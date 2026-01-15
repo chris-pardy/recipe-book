@@ -142,12 +142,12 @@ export async function initDB(): Promise<IDBPDatabase<RecipeBookDB>> {
           }
         }
 
-        // Migration from version 2 to 3
-        // Add support for fork metadata (no schema changes needed, forkMetadata is optional)
+        // Migration from version 2 to 3: Add support for fork metadata
+        // No schema changes required - forkMetadata is an optional field on the recipe value
         // Existing recipes will continue to work without forkMetadata
         if (oldVersion < 3 && oldVersion > 0) {
-          // No schema changes required - forkMetadata is an optional field
-          // Existing recipes will simply not have forkMetadata, which is fine
+          // No migration logic needed - forkMetadata is optional and will be added
+          // automatically when recipes are forked via the recipeDB.put() method
         }
       },
     })

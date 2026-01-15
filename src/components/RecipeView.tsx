@@ -169,8 +169,8 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
       const forkMetadata = createForkMetadata(recipeUri)
       
       // Save recipe to IndexedDB with fork metadata (this adds it to the user's local collection)
-      // Ensure consistency by always including the URI
-      await recipeDB.put(recipeUri, recipe, undefined, false, forkMetadata)
+      // Ensure consistency by explicitly setting the URI (recipeDB.put will overwrite recipe.uri anyway)
+      await recipeDB.put(recipeUri, { ...recipe, uri: recipeUri }, undefined, false, forkMetadata)
       
       // Add to default collection
       await ensureRecipeInDefaultCollection(recipeUri)
@@ -215,6 +215,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         collection.recipeUris.includes(recipeUri),
       )
 
+      const failedCollections: string[] = []
       for (const collection of collectionsToUpdate) {
         try {
           const updatedRecipeUris = collection.recipeUris.filter(
@@ -232,9 +233,19 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
             recipeUris: updatedRecipeUris,
           }, result.cid)
         } catch (error) {
+          const collectionName = collection.name || collection.uri
+          failedCollections.push(collectionName)
           console.error(`Failed to update collection ${collection.uri}:`, error)
           // Continue with other collections even if one fails
         }
+      }
+
+      // Log warning if any collection updates failed, but continue with deletion
+      if (failedCollections.length > 0) {
+        console.warn(
+          `Failed to remove recipe from some collections: ${failedCollections.join(', ')}. ` +
+          'The recipe will still be removed from your local collection.'
+        )
       }
 
       // Delete from IndexedDB
