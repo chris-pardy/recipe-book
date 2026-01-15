@@ -48,6 +48,8 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [showCollectionDialog, setShowCollectionDialog] = useState(false)
   const [isUnforking, setIsUnforking] = useState(false)
   const [unforkError, setUnforkError] = useState<string | null>(null)
+  const [subRecipePreviews, setSubRecipePreviews] = useState<Map<string, Recipe & { uri: string }>>(new Map())
+  const [isLoadingSubRecipes, setIsLoadingSubRecipes] = useState(false)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
   const isForked = isRecipeForked(recipe)
@@ -118,6 +120,53 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
       mounted = false
     }
   }, [recipeUri, isAuthenticated, session, isOwned])
+
+  // Load sub-recipe previews
+  useEffect(() => {
+    async function loadSubRecipePreviews() {
+      if (!recipe || !recipe.subRecipes || recipe.subRecipes.length === 0) {
+        setSubRecipePreviews(new Map())
+        return
+      }
+
+      setIsLoadingSubRecipes(true)
+      const previews = new Map<string, Recipe & { uri: string }>()
+
+      for (const uri of recipe.subRecipes) {
+        try {
+          // Try IndexedDB first
+          let subRecipe = await recipeDB.get(uri)
+          
+          // If not in cache, try to fetch from PDS
+          if (!subRecipe && isAuthenticated && session) {
+            try {
+              const agent = await getAuthenticatedAgent()
+              if (agent) {
+                const recipeRecord = await getRecipe(agent, uri)
+                if (recipeRecord) {
+                  subRecipe = { ...recipeRecord, uri }
+                  await recipeDB.put(uri, subRecipe)
+                }
+              }
+            } catch (err) {
+              console.error(`Failed to fetch sub-recipe ${uri}:`, err)
+            }
+          }
+
+          if (subRecipe) {
+            previews.set(uri, subRecipe)
+          }
+        } catch (err) {
+          console.error(`Failed to load sub-recipe ${uri}:`, err)
+        }
+      }
+
+      setSubRecipePreviews(previews)
+      setIsLoadingSubRecipes(false)
+    }
+
+    loadSubRecipePreviews()
+  }, [recipe, isAuthenticated, session])
 
   const handleDeleteClick = () => {
     setShowDeleteDialog(true)
@@ -382,18 +431,41 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
             {recipe.subRecipes && recipe.subRecipes.length > 0 && (
               <div>
                 <h3 className="font-semibold mb-2">Sub-recipes</h3>
-                <ul className="list-disc list-inside">
-                  {recipe.subRecipes.map((subRecipeUri) => (
-                    <li key={subRecipeUri}>
-                      <Link
-                        to={`/recipe/${encodeURIComponent(subRecipeUri)}`}
-                        className="text-primary hover:underline"
-                      >
-                        {subRecipeUri}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
+                {isLoadingSubRecipes ? (
+                  <p className="text-sm text-gray-500">Loading sub-recipes...</p>
+                ) : (
+                  <div className="space-y-2">
+                    {recipe.subRecipes.map((subRecipeUri) => {
+                      const preview = subRecipePreviews.get(subRecipeUri)
+                      return (
+                        <Card key={subRecipeUri} className="hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <Link
+                                  to={`/recipe/${encodeURIComponent(subRecipeUri)}`}
+                                  className="text-primary hover:underline font-medium"
+                                >
+                                  {preview ? preview.title : subRecipeUri}
+                                </Link>
+                                {preview && (
+                                  <div className="mt-1 text-sm text-gray-500">
+                                    {preview.servings} serving{preview.servings !== 1 ? 's' : ''}
+                                    {preview.ingredients && preview.ingredients.length > 0 && (
+                                      <span className="ml-2">
+                                        • {preview.ingredients.length} ingredient{preview.ingredients.length !== 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

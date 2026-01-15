@@ -4,9 +4,10 @@
  */
 
 import type { BskyAgent } from '@atproto/api'
-import { deleteRecipe } from './atproto'
+import { deleteRecipe, updateRecipe } from './atproto'
 import { recipeDB, collectionDB } from './indexeddb'
 import { listCollections, updateCollection } from './atproto'
+import { getParentRecipes } from '../utils/subRecipeValidation'
 import type { Collection } from '../types/collection'
 
 /**
@@ -64,6 +65,49 @@ export async function deleteRecipeComplete(
     errors.push(errorMsg)
     console.error(errorMsg, error)
     // Continue with deletion even if collection updates fail
+  }
+
+  // Step 1.5: Remove recipe from all parent recipes' subRecipes arrays
+  try {
+    const parentRecipeUris = await getParentRecipes(recipeUri)
+    
+    for (const parentUri of parentRecipeUris) {
+      try {
+        // Get parent recipe
+        const parentRecipe = await recipeDB.get(parentUri)
+        if (!parentRecipe || !parentRecipe.subRecipes) {
+          continue
+        }
+
+        // Remove deleted recipe from subRecipes
+        const updatedSubRecipes = parentRecipe.subRecipes.filter(
+          (uri) => uri !== recipeUri,
+        )
+
+        // Update parent recipe in PDS
+        await updateRecipe(agent, parentUri, {
+          subRecipes: updatedSubRecipes.length > 0 ? updatedSubRecipes : undefined,
+        })
+
+        // Update parent recipe in IndexedDB
+        const updatedParent = {
+          ...parentRecipe,
+          subRecipes: updatedSubRecipes.length > 0 ? updatedSubRecipes : undefined,
+          updatedAt: new Date().toISOString(),
+        }
+        await recipeDB.put(parentUri, updatedParent)
+      } catch (error) {
+        const errorMsg = `Failed to update parent recipe ${parentUri}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        errors.push(errorMsg)
+        console.error(errorMsg, error)
+        // Continue with other parent recipes even if one fails
+      }
+    }
+  } catch (error) {
+    const errorMsg = `Failed to get parent recipes: ${error instanceof Error ? error.message : 'Unknown error'}`
+    errors.push(errorMsg)
+    console.error(errorMsg, error)
+    // Continue with deletion even if parent recipe updates fail
   }
 
   // Step 2: Delete from PDS
