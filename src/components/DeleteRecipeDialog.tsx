@@ -61,6 +61,8 @@ export function DeleteRecipeDialog({
             variant="outline"
             onClick={handleCancel}
             disabled={isLoading}
+            aria-label="Cancel recipe deletion"
+            autoFocus
           >
             Cancel
           </Button>
@@ -68,6 +70,7 @@ export function DeleteRecipeDialog({
             variant="destructive"
             onClick={handleConfirm}
             disabled={isLoading}
+            aria-label={`Delete recipe ${recipeTitle}`}
           >
             {isLoading ? 'Deleting...' : 'Delete'}
           </Button>

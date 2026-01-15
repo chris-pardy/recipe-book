@@ -166,8 +166,15 @@ export async function logout(session: OAuthSession): Promise<void> {
  * Maps the OAuth session's 'sub' field (which contains the handle) to our AuthSession type
  * @param session - The OAuth session from @atproto/oauth-client-browser
  * @returns An AuthSession with did and handle
+ * @throws {Error} If required session properties are missing
  */
 export function toAuthSession(session: OAuthSession): AuthSession {
+  if (!session.did) {
+    throw new Error('OAuth session missing required "did" property')
+  }
+  if (!session.sub) {
+    throw new Error('OAuth session missing required "sub" property')
+  }
   return {
     did: session.did,
     handle: session.sub, // OAuth 'sub' field contains the handle

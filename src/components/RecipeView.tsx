@@ -115,8 +115,9 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
       await deleteRecipeComplete(agent, recipeUri)
 
       // Redirect to home after successful deletion
-      // TODO: Replace with proper routing when React Router is added
-      window.location.href = '/'
+      // Use history API for better SPA behavior (will be replaced with React Router when added)
+      window.history.pushState({}, '', '/')
+      window.location.reload()
     } catch (err) {
       setDeleteError(
         err instanceof Error ? err.message : 'Failed to delete recipe',

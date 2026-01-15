@@ -23,36 +23,70 @@ export async function deleteRecipeComplete(
   agent: BskyAgent,
   recipeUri: string,
 ): Promise<void> {
+  const errors: string[] = []
+  
   // Step 1: Remove recipe from all collections
   // Get all collections from IndexedDB first (faster than PDS)
-  const allCollections = await collectionDB.getAll()
-  
-  // Filter collections that contain this recipe
-  const collectionsToUpdate = allCollections.filter((collection) =>
-    collection.recipeUris.includes(recipeUri),
-  )
-
-  // Update each collection to remove the recipe URI
-  for (const collection of collectionsToUpdate) {
-    const updatedRecipeUris = collection.recipeUris.filter(
-      (uri) => uri !== recipeUri,
+  try {
+    const allCollections = await collectionDB.getAll()
+    
+    // Filter collections that contain this recipe
+    const collectionsToUpdate = allCollections.filter((collection) =>
+      collection.recipeUris.includes(recipeUri),
     )
-    
-    // Update in PDS
-    await updateCollection(agent, collection.uri, {
-      recipeUris: updatedRecipeUris,
-    })
-    
-    // Update in IndexedDB
-    await collectionDB.put(collection.uri, {
-      ...collection,
-      recipeUris: updatedRecipeUris,
-    })
+
+    // Update each collection to remove the recipe URI
+    for (const collection of collectionsToUpdate) {
+      try {
+        const updatedRecipeUris = collection.recipeUris.filter(
+          (uri) => uri !== recipeUri,
+        )
+        
+        // Update in PDS
+        await updateCollection(agent, collection.uri, {
+          recipeUris: updatedRecipeUris,
+        })
+        
+        // Update in IndexedDB
+        await collectionDB.put(collection.uri, {
+          ...collection,
+          recipeUris: updatedRecipeUris,
+        })
+      } catch (error) {
+        const errorMsg = `Failed to update collection ${collection.uri}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        errors.push(errorMsg)
+        console.error(errorMsg, error)
+        // Continue with other collections even if one fails
+      }
+    }
+  } catch (error) {
+    const errorMsg = `Failed to get collections: ${error instanceof Error ? error.message : 'Unknown error'}`
+    errors.push(errorMsg)
+    console.error(errorMsg, error)
+    // Continue with deletion even if collection updates fail
   }
 
   // Step 2: Delete from PDS
-  await deleteRecipe(agent, recipeUri)
+  try {
+    await deleteRecipe(agent, recipeUri)
+  } catch (error) {
+    const errorMsg = `Failed to delete recipe from PDS: ${error instanceof Error ? error.message : 'Unknown error'}`
+    errors.push(errorMsg)
+    console.error(errorMsg, error)
+    // If PDS deletion fails, we should still try to clean up local cache
+  }
 
   // Step 3: Remove from IndexedDB cache
-  await recipeDB.delete(recipeUri)
+  try {
+    await recipeDB.delete(recipeUri)
+  } catch (error) {
+    const errorMsg = `Failed to delete recipe from IndexedDB: ${error instanceof Error ? error.message : 'Unknown error'}`
+    errors.push(errorMsg)
+    console.error(errorMsg, error)
+  }
+
+  // If any critical errors occurred, throw
+  if (errors.length > 0) {
+    throw new Error(`Recipe deletion completed with errors:\n${errors.join('\n')}`)
+  }
 }
