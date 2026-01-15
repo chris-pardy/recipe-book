@@ -18,6 +18,11 @@ vi.mock('../services/atproto', () => ({
 vi.mock('../services/indexeddb', () => ({
   recipeDB: {
     put: vi.fn().mockResolvedValue(undefined),
+    getAll: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockResolvedValue(null),
+  },
+  collectionDB: {
+    getAll: vi.fn().mockResolvedValue([]),
   },
 }))
 
@@ -63,9 +68,14 @@ vi.mock('../services/auth', () => ({
   clearAuthState: vi.fn(),
 }))
 
+vi.mock('../utils/subRecipeValidation', () => ({
+  wouldCreateCircularReference: vi.fn().mockResolvedValue(false),
+}))
+
 const agentService = await import('../services/agent')
 const atprotoService = await import('../services/atproto')
 const indexeddbService = await import('../services/indexeddb')
+const subRecipeValidationService = await import('../utils/subRecipeValidation')
 
 describe('RecipeCreationForm Component', () => {
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -874,6 +884,270 @@ describe('RecipeCreationForm Component', () => {
       const putCall = (indexeddbService.recipeDB.put as any).mock.calls[0]
       expect(putCall[1].createdAt).toBe('2024-01-01T00:00:00Z')
       expect(putCall[1].updatedAt).not.toBe('2024-01-01T00:00:00Z')
+    })
+  })
+
+  describe('Sub-recipes', () => {
+    beforeEach(() => {
+      // Mock available recipes for sub-recipe selection
+      const mockRecipes = [
+        {
+          uri: 'at://did:test:123/dev.chrispardy.recipes/sub1',
+          title: 'Sub Recipe 1',
+          servings: 4,
+          ingredients: [],
+          steps: [],
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+        {
+          uri: 'at://did:test:123/dev.chrispardy.recipes/sub2',
+          title: 'Sub Recipe 2',
+          servings: 6,
+          ingredients: [],
+          steps: [],
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        },
+      ]
+      ;(indexeddbService.recipeDB.getAll as any).mockResolvedValue(mockRecipes)
+      ;(indexeddbService.recipeDB.get as any).mockImplementation((uri: string) => {
+        return Promise.resolve(mockRecipes.find(r => r.uri === uri) || null)
+      })
+    })
+
+    it('should show sub-recipe selector when "Add Sub-recipe" is clicked', async () => {
+      const user = userEvent.setup()
+      render(<RecipeCreationForm />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/add sub-recipe/i)).toBeInTheDocument()
+      })
+
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should search for recipes when typing in sub-recipe search', async () => {
+      const user = userEvent.setup()
+      render(<RecipeCreationForm />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/add sub-recipe/i)).toBeInTheDocument()
+      })
+
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+
+      const searchInput = screen.getByLabelText(/search recipes/i)
+      await user.type(searchInput, 'Sub Recipe')
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should add sub-recipe when clicking on search result', async () => {
+      const user = userEvent.setup()
+      render(<RecipeCreationForm />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/add sub-recipe/i)).toBeInTheDocument()
+      })
+
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+
+      const searchInput = screen.getByLabelText(/search recipes/i)
+      await user.type(searchInput, 'Sub Recipe')
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+
+      const subRecipeButton = screen.getByText(/sub recipe 1/i)
+      await user.click(subRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+
+      // Should show sub-recipe in the list
+      expect(screen.getByText(/4 serving/i)).toBeInTheDocument()
+    })
+
+    it('should prevent adding sub-recipe if it would create circular reference', async () => {
+      const user = userEvent.setup()
+      ;(subRecipeValidationService.wouldCreateCircularReference as any).mockResolvedValueOnce(true)
+
+      render(<RecipeCreationForm />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/add sub-recipe/i)).toBeInTheDocument()
+      })
+
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+
+      const searchInput = screen.getByLabelText(/search recipes/i)
+      await user.type(searchInput, 'Sub Recipe')
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+
+      const subRecipeButton = screen.getByText(/sub recipe 1/i)
+      await user.click(subRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/circular reference/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should remove sub-recipe when remove button is clicked', async () => {
+      const user = userEvent.setup()
+      const initialRecipe = {
+        title: 'Test Recipe',
+        servings: 4,
+        ingredients: [],
+        steps: [{ id: '1', text: 'Mix ingredients', order: 0 }],
+        subRecipes: ['at://did:test:123/dev.chrispardy.recipes/sub1'],
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      }
+
+      render(
+        <RecipeCreationForm
+          recipeUri="at://did:test:123/dev.chrispardy.recipes/parent"
+          initialRecipe={initialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+
+      const removeButtons = screen.getAllByRole('button', { name: /remove/i })
+      const subRecipeRemoveButton = removeButtons.find((btn) =>
+        btn.getAttribute('aria-label')?.includes('sub-recipe')
+      )
+
+      if (subRecipeRemoveButton) {
+        await user.click(subRecipeRemoveButton)
+
+        await waitFor(() => {
+          expect(screen.queryByText(/sub recipe 1/i)).not.toBeInTheDocument()
+        })
+      }
+    })
+
+    it('should include sub-recipes in recipe data when submitting', async () => {
+      const user = userEvent.setup()
+      render(<RecipeCreationForm />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/title/i)).toBeInTheDocument()
+      })
+
+      // Fill in basic form
+      const titleInput = screen.getByLabelText(/title/i)
+      await user.type(titleInput, 'Test Recipe')
+
+      const textareas = screen.getAllByRole('textbox')
+      const stepTextarea = textareas.find((textarea) =>
+        textarea.getAttribute('placeholder')?.includes('Step')
+      )
+      if (stepTextarea) {
+        await user.type(stepTextarea, 'Mix ingredients')
+      }
+
+      // Add sub-recipe
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+
+      const searchInput = screen.getByLabelText(/search recipes/i)
+      await user.type(searchInput, 'Sub Recipe')
+
+      await waitFor(() => {
+        expect(screen.getByText(/sub recipe 1/i)).toBeInTheDocument()
+      })
+
+      const subRecipeButton = screen.getByText(/sub recipe 1/i)
+      await user.click(subRecipeButton)
+
+      // Submit
+      const submitButton = screen.getByRole('button', { name: /create recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(atprotoService.createRecipe).toHaveBeenCalled()
+      })
+
+      const createRecipeCall = (atprotoService.createRecipe as any).mock.calls[0]
+      expect(createRecipeCall[1].subRecipes).toEqual([
+        'at://did:test:123/dev.chrispardy.recipes/sub1',
+      ])
+    })
+
+    it('should exclude current recipe from sub-recipe search results', async () => {
+      const user = userEvent.setup()
+      const initialRecipe = {
+        title: 'Current Recipe',
+        servings: 4,
+        ingredients: [],
+        steps: [{ id: '1', text: 'Mix ingredients', order: 0 }],
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      }
+
+      render(
+        <RecipeCreationForm
+          recipeUri="at://did:test:123/dev.chrispardy.recipes/current"
+          initialRecipe={initialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/add sub-recipe/i)).toBeInTheDocument()
+      })
+
+      const addSubRecipeButton = screen.getByText(/add sub-recipe/i)
+      await user.click(addSubRecipeButton)
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/search recipes/i)).toBeInTheDocument()
+      })
+
+      const searchInput = screen.getByLabelText(/search recipes/i)
+      await user.type(searchInput, 'Recipe')
+
+      // Should not show current recipe in results
+      await waitFor(() => {
+        const results = screen.queryAllByText(/current recipe/i)
+        expect(results.length).toBe(0)
+      })
     })
   })
 })

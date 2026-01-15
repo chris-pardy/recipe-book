@@ -11,6 +11,7 @@ import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
 import { aggregateIngredients as aggregateIngredientsUtil, aggregatedToRecipeIngredients } from '../utils/ingredientAggregation'
 import { getUnitSystem } from '../utils/unitConversion'
+import { wouldCreateCircularReference } from '../utils/subRecipeValidation'
 import { createRecipe, updateRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
@@ -292,6 +293,16 @@ export function RecipeCreationForm({
   const [manualIngredientUnit, setManualIngredientUnit] = useState('')
   const [ingredientSuggestions, setIngredientSuggestions] = useState<AggregatedIngredient[]>([])
   
+  // Sub-recipe selection state
+  const [subRecipes, setSubRecipes] = useState<string[]>(() => {
+    return initialRecipe?.subRecipes || []
+  })
+  const [showSubRecipeSelector, setShowSubRecipeSelector] = useState(false)
+  const [subRecipeSearchQuery, setSubRecipeSearchQuery] = useState('')
+  const [subRecipeSearchResults, setSubRecipeSearchResults] = useState<(Recipe & { uri: string })[]>([])
+  const [isSearchingSubRecipes, setIsSearchingSubRecipes] = useState(false)
+  const [subRecipeError, setSubRecipeError] = useState<string | null>(null)
+  
   // Debounce steps for ingredient extraction to prevent race conditions
   const deferredSteps = useDeferredValue(steps)
   
@@ -335,6 +346,89 @@ export function RecipeCreationForm({
     }
     loadCollections()
   }, [isAuthenticated])
+
+  // Search for recipes to add as sub-recipes
+  const searchSubRecipes = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSubRecipeSearchResults([])
+      return
+    }
+
+    setIsSearchingSubRecipes(true)
+    setSubRecipeError(null)
+
+    try {
+      // Note: Loading all recipes with getAll() could be slow with many recipes.
+      // Consider implementing pagination, a more efficient search index, or limiting
+      // initial results and loading more on scroll for better performance.
+      const allRecipes = await recipeDB.getAll()
+      const queryLower = query.toLowerCase().trim()
+      
+      // Filter recipes that match the query and exclude:
+      // - The current recipe (if editing)
+      // - Already selected sub-recipes
+      const matchingRecipes = allRecipes.filter((recipe) => {
+        if (recipeUri && recipe.uri === recipeUri) return false
+        if (subRecipes.includes(recipe.uri)) return false
+        return recipe.title.toLowerCase().includes(queryLower)
+      })
+
+      setSubRecipeSearchResults(matchingRecipes.slice(0, 10)) // Limit to 10 results
+    } catch (err) {
+      // Provide more specific error messages for different failure types
+      if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+        setSubRecipeError('Storage quota exceeded. Please free up some space.')
+      } else if (err instanceof DOMException && err.name === 'InvalidStateError') {
+        setSubRecipeError('Database connection error. Please refresh the page.')
+      } else if (err instanceof Error) {
+        setSubRecipeError(`Failed to search recipes: ${err.message}`)
+      } else {
+        setSubRecipeError('Failed to search recipes. Please try again.')
+      }
+    } finally {
+      setIsSearchingSubRecipes(false)
+    }
+  }, [recipeUri, subRecipes])
+
+  // Debounced sub-recipe search
+  useEffect(() => {
+    if (!showSubRecipeSelector) return
+
+    const timeoutId = window.setTimeout(() => {
+      searchSubRecipes(subRecipeSearchQuery)
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [subRecipeSearchQuery, showSubRecipeSelector, searchSubRecipes])
+
+  // Load sub-recipe previews
+  const [subRecipePreviews, setSubRecipePreviews] = useState<Map<string, Recipe & { uri: string }>>(new Map())
+  
+  useEffect(() => {
+    async function loadSubRecipePreviews() {
+      if (subRecipes.length === 0) {
+        setSubRecipePreviews(new Map())
+        return
+      }
+
+      const previews = new Map<string, Recipe & { uri: string }>()
+      for (const uri of subRecipes) {
+        try {
+          const recipe = await recipeDB.get(uri)
+          if (recipe) {
+            previews.set(uri, recipe)
+          }
+        } catch (err) {
+          console.error(`Failed to load sub-recipe ${uri}:`, err)
+        }
+      }
+      setSubRecipePreviews(previews)
+    }
+
+    loadSubRecipePreviews()
+  }, [subRecipes])
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -424,6 +518,44 @@ export function RecipeCreationForm({
   
   const handleRemoveManualIngredient = (id: string) => {
     setManualIngredients(prev => prev.filter(ing => ing.id !== id))
+  }
+
+  const handleAddSubRecipe = async (subRecipeUri: string) => {
+    // Check for circular reference
+    // If editing, we can check for circular references using the recipe URI.
+    // When creating a new recipe, we don't have a URI yet, so circular reference
+    // checks are skipped during creation. The check will be performed after the
+    // recipe is created if needed (though this would require a different UX flow).
+    if (recipeUri) {
+      const wouldCreateCircular = await wouldCreateCircularReference(
+        recipeUri,
+        subRecipeUri,
+      )
+
+      if (wouldCreateCircular) {
+        setSubRecipeError('Adding this recipe would create a circular reference')
+        return
+      }
+    }
+    // Note: Self-reference check during creation is not possible since we don't
+    // have a recipe URI yet. This is acceptable as users can't add a recipe as
+    // its own sub-recipe during creation (the recipe doesn't exist yet).
+
+    // Add sub-recipe
+    setSubRecipes(prev => {
+      if (prev.includes(subRecipeUri)) return prev
+      return [...prev, subRecipeUri]
+    })
+    
+    // Clear search
+    setSubRecipeSearchQuery('')
+    setSubRecipeSearchResults([])
+    setShowSubRecipeSelector(false)
+    setSubRecipeError(null)
+  }
+
+  const handleRemoveSubRecipe = (subRecipeUri: string) => {
+    setSubRecipes(prev => prev.filter(uri => uri !== subRecipeUri))
   }
   
   const validateForm = (): string | null => {
@@ -536,6 +668,7 @@ export function RecipeCreationForm({
         servings,
         ingredients,
         steps: recipeSteps,
+        subRecipes: subRecipes.length > 0 ? subRecipes : undefined,
       }
       
       let uri: string
@@ -847,6 +980,124 @@ export function RecipeCreationForm({
           ) : (
             <div className="border border-gray-300 rounded-md p-4 bg-gray-50 text-sm text-gray-500 text-center">
               No ingredients extracted yet. Add steps with ingredient amounts to see them here.
+            </div>
+          )}
+        </div>
+        
+        {/* Sub-recipes selection */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-700">
+              Sub-recipes (optional)
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setShowSubRecipeSelector(!showSubRecipeSelector)
+                setSubRecipeSearchQuery('')
+                setSubRecipeSearchResults([])
+                setSubRecipeError(null)
+              }}
+              className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+              disabled={isSubmitting}
+            >
+              {showSubRecipeSelector ? 'Cancel' : '+ Add Sub-recipe'}
+            </button>
+          </div>
+          
+          {/* Sub-recipe search */}
+          {showSubRecipeSelector && (
+            <div className="mb-4 p-4 border border-gray-300 rounded-md bg-gray-50 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Search Recipes
+                </label>
+                <input
+                  type="text"
+                  value={subRecipeSearchQuery}
+                  onChange={(e) => setSubRecipeSearchQuery(e.target.value)}
+                  placeholder="Search by recipe title..."
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  disabled={isSubmitting || isSearchingSubRecipes}
+                />
+                {isSearchingSubRecipes && (
+                  <p className="mt-1 text-xs text-gray-500">Searching...</p>
+                )}
+                {subRecipeError && (
+                  <p className="mt-1 text-xs text-red-600" role="alert">
+                    {subRecipeError}
+                  </p>
+                )}
+              </div>
+              
+              {/* Search results */}
+              {subRecipeSearchResults.length > 0 && (
+                <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                  {subRecipeSearchResults.map((recipe) => (
+                    <button
+                      key={recipe.uri}
+                      type="button"
+                      onClick={() => handleAddSubRecipe(recipe.uri)}
+                      className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                      disabled={isSubmitting}
+                    >
+                      <div className="font-medium text-sm text-gray-900">
+                        {recipe.title}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {subRecipeSearchQuery && !isSearchingSubRecipes && subRecipeSearchResults.length === 0 && (
+                <p className="text-xs text-gray-500 text-center py-2">
+                  No recipes found matching "{subRecipeSearchQuery}"
+                </p>
+              )}
+            </div>
+          )}
+          
+          {/* Selected sub-recipes */}
+          {subRecipes.length > 0 && (
+            <div className="border border-gray-300 rounded-md p-4 bg-gray-50">
+              <ul className="space-y-2">
+                {subRecipes.map((uri) => {
+                  const preview = subRecipePreviews.get(uri)
+                  return (
+                    <li
+                      key={uri}
+                      className="flex items-center justify-between py-1 border-b border-gray-200 last:border-b-0"
+                    >
+                      <div className="flex-1">
+                        <span className="text-sm text-gray-700">
+                          {preview ? preview.title : uri}
+                        </span>
+                        {preview && (
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({preview.servings} serving{preview.servings !== 1 ? 's' : ''})
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSubRecipe(uri)}
+                        className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
+                        disabled={isSubmitting}
+                        aria-label={`Remove sub-recipe ${preview?.title || uri}`}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
+          {subRecipes.length === 0 && !showSubRecipeSelector && (
+            <div className="border border-gray-300 rounded-md p-4 bg-gray-50 text-sm text-gray-500 text-center">
+              No sub-recipes added. Click "Add Sub-recipe" to link other recipes.
             </div>
           )}
         </div>
