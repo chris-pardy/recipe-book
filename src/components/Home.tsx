@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { CreateCollectionDialog } from './CreateCollectionDialog'
 import { DeleteCollectionDialog } from './DeleteCollectionDialog'
+import { RecipeSearch, HighlightedText, type SearchResult } from './RecipeSearch'
+import { extractSearchTerms } from '../utils/searchHighlight'
 import type { Collection } from '../types/collection'
 import type { Recipe } from '../types/recipe'
 
@@ -21,6 +23,9 @@ export function Home() {
   const { isAuthenticated } = useAuth()
   const [collections, setCollections] = useState<(Collection & { uri: string })[]>([])
   const [recipes, setRecipes] = useState<(Recipe & { uri: string })[]>([])
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [isSearchActive, setIsSearchActive] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [selectedCollectionUri, setSelectedCollectionUri] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +37,12 @@ export function Home() {
   useEffect(() => {
     async function loadData() {
       if (!isAuthenticated) {
+        setIsLoading(false)
+        return
+      }
+
+      // Don't load recipes if search is active - search results will be shown instead
+      if (isSearchActive) {
         setIsLoading(false)
         return
       }
@@ -63,7 +74,7 @@ export function Home() {
     }
 
     loadData()
-  }, [isAuthenticated, selectedCollectionUri])
+  }, [isAuthenticated, selectedCollectionUri, isSearchActive])
 
   if (!isAuthenticated) {
     return (
@@ -150,27 +161,65 @@ export function Home() {
     }
   }
 
+  const handleSearchResultsChange = (results: SearchResult[]) => {
+    setSearchResults(results)
+  }
+
+  const handleSearchActiveChange = (isActive: boolean) => {
+    setIsSearchActive(isActive)
+  }
+
+  const handleSearchChange = (searching: boolean) => {
+    // Update loading state based on search status
+    if (searching) {
+      setIsLoading(true)
+    } else {
+      setIsLoading(false)
+    }
+  }
+
   const selectedCollection = selectedCollectionUri
     ? collections.find((c) => c.uri === selectedCollectionUri)
     : null
+
+  // Determine which recipes to display
+  const displayRecipes = isSearchActive
+    ? searchResults.map((result) => result.recipe)
+    : recipes
 
   // Show collections if they exist
   if (collections.length > 0 || selectedCollectionUri) {
     return (
       <div className="container mx-auto p-4">
+        <div className="mb-6">
+          <RecipeSearch
+            onResultsChange={handleSearchResultsChange}
+            onSearchChange={handleSearchChange}
+            onSearchActiveChange={handleSearchActiveChange}
+            onSearchQueryChange={setSearchQuery}
+            className="mb-6"
+          />
+        </div>
+
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              {selectedCollection ? selectedCollection.name : 'Collections'}
+              {isSearchActive
+                ? `Search Results (${searchResults.length})`
+                : selectedCollection
+                  ? selectedCollection.name
+                  : 'Collections'}
             </h1>
             <p className="text-gray-600 mt-1">
-              {selectedCollection
-                ? `${selectedCollection.recipeUris.length} recipe${selectedCollection.recipeUris.length !== 1 ? 's' : ''}`
-                : 'Your recipe collections'}
+              {isSearchActive
+                ? `Found ${searchResults.length} recipe${searchResults.length !== 1 ? 's' : ''}`
+                : selectedCollection
+                  ? `${selectedCollection.recipeUris.length} recipe${selectedCollection.recipeUris.length !== 1 ? 's' : ''}`
+                  : 'Your recipe collections'}
             </p>
           </div>
           <div className="flex gap-2">
-            {selectedCollectionUri && (
+            {selectedCollectionUri && !isSearchActive && (
               <Button
                 variant="outline"
                 onClick={() => setSelectedCollectionUri(null)}
@@ -178,15 +227,61 @@ export function Home() {
                 Back to Collections
               </Button>
             )}
-            <Button onClick={() => setShowCreateDialog(true)}>
-              Create Collection
-            </Button>
+            {!isSearchActive && (
+              <Button onClick={() => setShowCreateDialog(true)}>
+                Create Collection
+              </Button>
+            )}
           </div>
         </div>
 
-        {selectedCollectionUri ? (
+        {isSearchActive ? (
+          // Show search results
+          searchResults.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <p className="text-gray-600 mb-4">
+                  No recipes found matching your search criteria
+                </p>
+                <p className="text-sm text-gray-500 mb-4">
+                  Try adjusting your search terms or filters
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {searchResults.map((result) => {
+                const searchTerms = extractSearchTerms(searchQuery)
+                return (
+                  <Card key={result.recipe.uri} className="hover:shadow-md transition-shadow">
+                    <CardHeader>
+                      <CardTitle>
+                        <Link
+                          to={`/recipe/${encodeURIComponent(result.recipe.uri)}`}
+                          className="hover:text-blue-600 transition-colors"
+                        >
+                          <HighlightedText text={result.recipe.title} searchTerms={searchTerms} />
+                        </Link>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-500 mb-2">
+                        {result.recipe.servings} serving{result.recipe.servings !== 1 ? 's' : ''}
+                      </p>
+                      {result.matchReasons.length > 0 && (
+                        <p className="text-xs text-gray-400">
+                          Matched by: {result.matchReasons.join(', ')}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )
+        ) : selectedCollectionUri ? (
           // Show recipes in selected collection
-          recipes.length === 0 ? (
+          displayRecipes.length === 0 ? (
             <Card>
               <CardContent className="p-6 text-center">
                 <p className="text-gray-600 mb-4">
@@ -202,7 +297,7 @@ export function Home() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {recipes.map((recipe) => (
+              {displayRecipes.map((recipe) => (
                 <Card key={recipe.uri} className="hover:shadow-md transition-shadow">
                   <CardHeader>
                     <CardTitle>
@@ -294,12 +389,72 @@ export function Home() {
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">All Recipes</h1>
+        <RecipeSearch
+          onResultsChange={handleSearchResultsChange}
+          onSearchChange={handleSearchChange}
+          onSearchActiveChange={handleSearchActiveChange}
+          onSearchQueryChange={setSearchQuery}
+          className="mb-6"
+        />
+      </div>
+
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">
+          {isSearchActive
+            ? `Search Results (${searchResults.length})`
+            : 'All Recipes'}
+        </h1>
         <p className="text-gray-600 mt-1">
-          Your recipe collection
+          {isSearchActive
+            ? `Found ${searchResults.length} recipe${searchResults.length !== 1 ? 's' : ''}`
+            : 'Your recipe collection'}
         </p>
       </div>
-      {recipes.length === 0 ? (
+
+      {isSearchActive ? (
+        searchResults.length === 0 ? (
+          <Card>
+            <CardContent className="p-6 text-center">
+              <p className="text-gray-600 mb-4">
+                No recipes found matching your search criteria
+              </p>
+              <p className="text-sm text-gray-500 mb-4">
+                Try adjusting your search terms or filters
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {searchResults.map((result) => {
+              const searchTerms = extractSearchTerms(searchQuery)
+              return (
+                <Card key={result.recipe.uri} className="hover:shadow-md transition-shadow">
+                  <CardHeader>
+                    <CardTitle>
+                      <Link
+                        to={`/recipe/${encodeURIComponent(result.recipe.uri)}`}
+                        className="hover:text-blue-600 transition-colors"
+                      >
+                        <HighlightedText text={result.recipe.title} searchTerms={searchTerms} />
+                      </Link>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-500 mb-2">
+                      {result.recipe.servings} serving{result.recipe.servings !== 1 ? 's' : ''}
+                    </p>
+                    {result.matchReasons.length > 0 && (
+                      <p className="text-xs text-gray-400">
+                        Matched by: {result.matchReasons.join(', ')}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        )
+      ) : displayRecipes.length === 0 ? (
         <Card>
           <CardContent className="p-6 text-center">
             <p className="text-gray-600 mb-4">No recipes yet</p>
@@ -313,7 +468,7 @@ export function Home() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {recipes.map((recipe) => (
+          {displayRecipes.map((recipe) => (
             <Card key={recipe.uri} className="hover:shadow-md transition-shadow">
               <CardHeader>
                 <CardTitle>
