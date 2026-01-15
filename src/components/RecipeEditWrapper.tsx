@@ -3,7 +3,7 @@
  * Loads the recipe, validates ownership, and passes it to RecipeCreationForm
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getRecipe } from '../services/atproto'
@@ -26,11 +26,16 @@ export function RecipeEditWrapper() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Decode the URI from the URL parameter
-  const recipeUri = id ? decodeURIComponent(id) : null
-
-  // Check ownership
-  const isOwned = recipeUri ? isRecipeOwned(recipeUri, session?.did || null) : false
+  // Decode the URI from the URL parameter with error handling
+  const recipeUri = useMemo(() => {
+    if (!id) return null
+    try {
+      return decodeURIComponent(id)
+    } catch (err) {
+      console.error('Failed to decode recipe URI:', err)
+      return null
+    }
+  }, [id])
 
   // Load recipe
   useEffect(() => {
@@ -53,7 +58,8 @@ export function RecipeEditWrapper() {
         return
       }
 
-      // Check ownership first
+      // Check ownership inside useEffect to ensure fresh values
+      const isOwned = isRecipeOwned(recipeUri, session?.did || null)
       if (!isOwned) {
         if (mounted) {
           setError('You can only edit recipes that you own')
@@ -109,7 +115,7 @@ export function RecipeEditWrapper() {
     return () => {
       mounted = false
     }
-  }, [recipeUri, isAuthenticated, session, isOwned])
+  }, [recipeUri, isAuthenticated, session])
 
   const handleSuccess = (uri: string) => {
     // Navigate to recipe view after successful update

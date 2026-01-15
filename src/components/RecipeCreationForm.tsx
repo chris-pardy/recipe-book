@@ -458,8 +458,12 @@ export function RecipeCreationForm({
             }
           }).filter((ref): ref is NonNullable<typeof ref> => ref !== null)
           
+          // Preserve original step ID if in edit mode and step already has an ID
+          // (steps are initialized with their original IDs from initialRecipe)
+          const stepId = isEditMode && step.id ? step.id : generateUUID()
+          
           return {
-            id: generateUUID(),
+            id: stepId,
             text: step.text.trim(),
             order: index,
             metadata: ingredientReferences.length > 0
