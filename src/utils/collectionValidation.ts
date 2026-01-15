@@ -17,18 +17,33 @@ export class CollectionValidationError extends Error {
 
 /**
  * Validates that a string is a valid ATProto URI
- * Basic validation - checks for at:// prefix and basic structure
+ * Validates that the URI has the correct structure and that the first segment is a DID
+ * @internal - Internal utility function, not exported
  */
 function isValidAtProtoUri(uri: string): boolean {
-  return /^at:\/\/[^/]+\/[^/]+\/[^/]+$/.test(uri)
+  if (!uri.startsWith('at://')) {
+    return false
+  }
+  const uriParts = uri.replace('at://', '').split('/')
+  if (uriParts.length < 3) {
+    return false
+  }
+  // Validate that the first part is a DID
+  return uriParts[0].startsWith('did:')
 }
 
 /**
  * Validates that a string is a valid ISO 8601 datetime
+ * Accepts ISO strings with or without milliseconds
+ * @internal - Internal utility function, not exported
  */
 function isValidIsoDateTime(dateString: string): boolean {
   const date = new Date(dateString)
-  return !isNaN(date.getTime()) && dateString === date.toISOString()
+  if (isNaN(date.getTime())) {
+    return false
+  }
+  // Check if it's a valid ISO 8601 format (more flexible - accepts with or without milliseconds)
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(dateString)
 }
 
 /**

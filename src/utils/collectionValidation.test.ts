@@ -195,6 +195,15 @@ describe('collectionValidation', () => {
         expect(() => validateCollection(collection)).toThrow('must be a valid ATProto URI')
       })
 
+      it('should throw if recipeUris contains URIs without did: prefix', () => {
+        const collection: Collection = {
+          ...validCollection,
+          recipeUris: ['at://not-a-did/collection/rkey'],
+        }
+        expect(() => validateCollection(collection)).toThrow(CollectionValidationError)
+        expect(() => validateCollection(collection)).toThrow('must be a valid ATProto URI')
+      })
+
       it('should accept valid ATProto URIs', () => {
         const collection: Collection = {
           ...validCollection,
@@ -235,11 +244,20 @@ describe('collectionValidation', () => {
         expect(() => validateCollection(collection)).toThrow('createdAt must be a valid ISO 8601')
       })
 
-      it('should accept valid ISO datetime strings', () => {
+      it('should accept valid ISO datetime strings with milliseconds', () => {
         const collection: Collection = {
           ...validCollection,
           createdAt: '2024-01-01T12:30:45.123Z',
           updatedAt: '2024-01-01T12:30:45.123Z', // Must be >= createdAt
+        }
+        expect(() => validateCollection(collection)).not.toThrow()
+      })
+
+      it('should accept valid ISO datetime strings without milliseconds', () => {
+        const collection: Collection = {
+          ...validCollection,
+          createdAt: '2024-01-01T12:30:45Z',
+          updatedAt: '2024-01-01T12:30:45Z', // Must be >= createdAt
         }
         expect(() => validateCollection(collection)).not.toThrow()
       })
@@ -299,6 +317,15 @@ describe('collectionValidation', () => {
           ...validCollection,
           createdAt: '2024-01-01T00:00:00.000Z',
           updatedAt: '2024-01-02T00:00:00.000Z',
+        }
+        expect(() => validateCollection(collection)).not.toThrow()
+      })
+
+      it('should accept ISO datetime strings without milliseconds for updatedAt', () => {
+        const collection: Collection = {
+          ...validCollection,
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-02T00:00:00Z',
         }
         expect(() => validateCollection(collection)).not.toThrow()
       })
