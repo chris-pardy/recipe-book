@@ -134,10 +134,12 @@ describe('RecipeView', () => {
 
   it('should show "Add to My Recipes" button for non-owned recipes', async () => {
     vi.mocked(isRecipeOwned).mockReturnValue(false)
-    // First call: load recipe, Second call: check if already in My Recipes (returns undefined = not added)
-    vi.mocked(recipeDB.get)
-      .mockResolvedValueOnce(mockRecipe)
-      .mockResolvedValueOnce(undefined)
+    // Recipe not in cache, so it will be fetched from PDS
+    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    const mockAgent = {} as any
+    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
+    vi.mocked(recipeDB.put).mockResolvedValue(undefined)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />)
 
@@ -148,10 +150,8 @@ describe('RecipeView', () => {
 
   it('should not show "Add to My Recipes" button if recipe is already added', async () => {
     vi.mocked(isRecipeOwned).mockReturnValue(false)
-    // First call: load recipe, Second call: check if already in My Recipes (returns recipe = already added)
-    vi.mocked(recipeDB.get)
-      .mockResolvedValueOnce(mockRecipe)
-      .mockResolvedValueOnce(mockRecipe)
+    // Recipe loaded from cache, so it's already in My Recipes
+    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />)
 
@@ -171,9 +171,11 @@ describe('RecipeView', () => {
   it('should add recipe to My Recipes when button is clicked', async () => {
     const user = userEvent.setup()
     vi.mocked(isRecipeOwned).mockReturnValue(false)
-    vi.mocked(recipeDB.get)
-      .mockResolvedValueOnce(mockRecipe) // Initial load
-      .mockResolvedValueOnce(undefined) // Check if already added
+    // Recipe not in cache, so it will be fetched from PDS
+    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    const mockAgent = {} as any
+    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
     vi.mocked(recipeDB.put).mockResolvedValue(undefined)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />)
@@ -186,7 +188,7 @@ describe('RecipeView', () => {
     await user.click(addButton)
 
     await waitFor(() => {
-      expect(recipeDB.put).toHaveBeenCalledWith(mockRecipe.uri, mockRecipe)
+      expect(recipeDB.put).toHaveBeenCalledWith(mockRecipe.uri, { ...mockRecipe, uri: mockRecipe.uri })
       expect(screen.getByText(/recipe added to my recipes/i)).toBeInTheDocument()
     })
   })
@@ -194,10 +196,16 @@ describe('RecipeView', () => {
   it('should show error when adding recipe to My Recipes fails', async () => {
     const user = userEvent.setup()
     vi.mocked(isRecipeOwned).mockReturnValue(false)
-    vi.mocked(recipeDB.get)
-      .mockResolvedValueOnce(mockRecipe) // Initial load
-      .mockResolvedValueOnce(undefined) // Check if already added
-    vi.mocked(recipeDB.put).mockRejectedValue(new Error('Failed to save'))
+    // Recipe not in cache, so it will be fetched from PDS
+    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    const mockAgent = {} as any
+    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
+    // First call: cache recipe after fetching from PDS (succeeds)
+    // Second call: add to My Recipes button click (fails)
+    vi.mocked(recipeDB.put)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Failed to save'))
 
     render(<RecipeView recipeUri={mockRecipe.uri} />)
 
@@ -239,9 +247,7 @@ describe('RecipeView', () => {
   it('should fetch recipe from PDS if not in cache', async () => {
     const mockAgent = {} as any
     vi.mocked(isRecipeOwned).mockReturnValue(true)
-    vi.mocked(recipeDB.get)
-      .mockResolvedValueOnce(undefined) // Not in cache
-      .mockResolvedValueOnce(undefined) // Check if already added (for owned recipes, this won't be called, but mock it anyway)
+    vi.mocked(recipeDB.get).mockResolvedValue(undefined) // Not in cache
     vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
     vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
     vi.mocked(recipeDB.put).mockResolvedValue(undefined)
@@ -253,7 +259,8 @@ describe('RecipeView', () => {
     })
 
     expect(getRecipe).toHaveBeenCalledWith(mockAgent, mockRecipe.uri)
-    expect(recipeDB.put).toHaveBeenCalledWith(mockRecipe.uri, mockRecipe)
+    // Should cache the complete recipe with URI
+    expect(recipeDB.put).toHaveBeenCalledWith(mockRecipe.uri, { ...mockRecipe, uri: mockRecipe.uri })
   })
 
   it('should show loading state', () => {

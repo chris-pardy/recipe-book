@@ -53,6 +53,10 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         if (cachedRecipe && mounted) {
           setRecipe(cachedRecipe)
           setIsLoading(false)
+          // If loaded from cache and not owned, it's already in My Recipes
+          if (!isOwned) {
+            setIsAddedToMyRecipes(true)
+          }
           return
         }
 
@@ -74,8 +78,8 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         if (mounted) {
           const recipeWithUri = { ...recipeRecord, uri: recipeUri }
           setRecipe(recipeWithUri)
-          // Cache in IndexedDB
-          await recipeDB.put(recipeUri, recipeRecord)
+          // Cache the complete recipe with URI
+          await recipeDB.put(recipeUri, recipeWithUri)
         }
       } catch (err) {
         if (mounted) {
@@ -149,7 +153,8 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
       // Save recipe to IndexedDB (this adds it to the user's local collection)
       // When collections are fully implemented (issue #12), this can be enhanced
       // to add the recipe to a default "My Saved Recipes" collection
-      await recipeDB.put(recipeUri, recipe)
+      // Ensure consistency by always including the URI
+      await recipeDB.put(recipeUri, { ...recipe, uri: recipeUri })
       setIsAddedToMyRecipes(true)
     } catch (err) {
       setAddToMyRecipesError(
@@ -160,18 +165,6 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     }
   }
 
-  // Check if recipe is already in My Recipes (IndexedDB)
-  useEffect(() => {
-    if (recipe && !isOwned) {
-      recipeDB.get(recipeUri).then((cachedRecipe) => {
-        if (cachedRecipe) {
-          setIsAddedToMyRecipes(true)
-        }
-      }).catch(() => {
-        // Ignore errors when checking
-      })
-    }
-  }, [recipe, recipeUri, isOwned])
 
   if (isLoading) {
     return (
