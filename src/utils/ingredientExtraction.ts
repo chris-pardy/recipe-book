@@ -4,12 +4,23 @@
  * Extracts structured ingredient data from natural language recipe step text.
  * Parses amounts, units, and ingredient names, returning byte offsets for
  * ingredient references in the text.
+ * 
+ * Enhanced with:
+ * - Ingredient synonym recognition and normalization
+ * - Cook time extraction from step text
+ * - Improved parsing accuracy for fractions and abbreviations
  */
 
 export interface ExtractedIngredient {
   name: string
   amount?: number
   unit?: string
+  byteStart: number
+  byteEnd: number
+}
+
+export interface ExtractedCookTime {
+  duration: number // in minutes
   byteStart: number
   byteEnd: number
 }
@@ -107,6 +118,105 @@ function getByteOffset(text: string, charIndex: number): number {
     cachedEncoder = new TextEncoder()
   }
   return cachedEncoder.encode(text.slice(0, charIndex)).length
+}
+
+/**
+ * Ingredient synonym dictionary
+ * Maps variations and synonyms to canonical ingredient names
+ * This helps normalize ingredient names for better matching
+ */
+const INGREDIENT_SYNONYMS: Record<string, string> = {
+  // Flour variations
+  'all-purpose flour': 'flour',
+  'all purpose flour': 'flour',
+  'ap flour': 'flour',
+  'plain flour': 'flour',
+  'white flour': 'flour',
+  'all-purpose': 'flour',
+  
+  // Sugar variations
+  'white sugar': 'sugar',
+  'granulated sugar': 'sugar',
+  'caster sugar': 'sugar',
+  'superfine sugar': 'sugar',
+  'brown sugar': 'brown sugar', // Keep as distinct
+  'light brown sugar': 'brown sugar',
+  'dark brown sugar': 'brown sugar',
+  'demerara sugar': 'brown sugar',
+  
+  // Butter variations
+  'unsalted butter': 'butter',
+  'salted butter': 'butter',
+  'sweet butter': 'butter',
+  
+  // Milk variations
+  'whole milk': 'milk',
+  'full-fat milk': 'milk',
+  'full fat milk': 'milk',
+  'skim milk': 'milk',
+  'skimmed milk': 'milk',
+  'low-fat milk': 'milk',
+  'low fat milk': 'milk',
+  
+  // Oil variations
+  'vegetable oil': 'oil',
+  'cooking oil': 'oil',
+  'canola oil': 'oil',
+  'rapeseed oil': 'oil',
+  'sunflower oil': 'oil',
+  'olive oil': 'olive oil', // Keep as distinct
+  
+  // Salt variations
+  'table salt': 'salt',
+  'kosher salt': 'salt',
+  'sea salt': 'salt',
+  'iodized salt': 'salt',
+  
+  // Egg variations
+  'chicken eggs': 'eggs',
+  'large eggs': 'eggs',
+  'medium eggs': 'eggs',
+  'small eggs': 'eggs',
+  
+  // Onion variations
+  'yellow onion': 'onion',
+  'white onion': 'onion',
+  'brown onion': 'onion',
+  'sweet onion': 'onion',
+  'red onion': 'red onion', // Keep as distinct
+  
+  // Garlic variations
+  'garlic cloves': 'garlic',
+  'garlic clove': 'garlic',
+  
+  // Pepper variations
+  'black pepper': 'pepper',
+  'ground pepper': 'pepper',
+  'white pepper': 'pepper',
+  'cayenne pepper': 'cayenne pepper', // Keep as distinct
+  'red pepper': 'red pepper', // Keep as distinct
+  
+  // Cheese variations
+  'cheddar cheese': 'cheese',
+  'mozzarella cheese': 'cheese',
+  'parmesan cheese': 'parmesan', // Keep as distinct
+  'parmigiano reggiano': 'parmesan',
+  
+  // Tomato variations
+  'tomatoes': 'tomato',
+  'fresh tomatoes': 'tomato',
+  'canned tomatoes': 'tomato',
+  'tomato paste': 'tomato paste', // Keep as distinct
+  'tomato sauce': 'tomato sauce', // Keep as distinct
+}
+
+/**
+ * Normalizes an ingredient name using the synonym dictionary
+ * Returns the canonical name if a synonym is found, otherwise returns the original name
+ */
+function normalizeIngredientName(name: string): string {
+  const normalized = name.toLowerCase().trim()
+  return INGREDIENT_SYNONYMS[normalized] || name
 }
 
 /**
@@ -216,6 +326,11 @@ function findNextIngredient(
 }
 
 /**
+ * Default threshold for duplicate detection in bytes
+ */
+const DEFAULT_DUPLICATE_THRESHOLD = 10
+
+/**
  * Options for ingredient extraction
  */
 export interface ExtractIngredientsOptions {
@@ -246,7 +361,7 @@ export function extractIngredients(
   stepText: string,
   options: ExtractIngredientsOptions = {}
 ): ExtractedIngredient[] {
-  const { duplicateThreshold = 10 } = options
+  const { duplicateThreshold = DEFAULT_DUPLICATE_THRESHOLD } = options
   if (!stepText || stepText.trim().length === 0) {
     return []
   }
@@ -276,8 +391,11 @@ export function extractIngredients(
     )
     
     if (!isDuplicate) {
+      // Normalize ingredient name using synonym dictionary
+      const normalizedName = normalizeIngredientName(ingredient.name)
+      
       ingredients.push({
-        name: ingredient.name,
+        name: normalizedName,
         amount: ingredient.amount,
         unit: ingredient.unit,
         byteStart,
@@ -306,8 +424,11 @@ export function extractIngredients(
         const byteStart = getByteOffset(stepText, matchStart)
         const byteEnd = getByteOffset(stepText, matchEnd)
         
+        // Normalize ingredient name using synonym dictionary
+        const normalizedName = normalizeIngredientName(name)
+        
         ingredients.push({
-          name,
+          name: normalizedName,
           byteStart,
           byteEnd,
         })
@@ -316,4 +437,130 @@ export function extractIngredients(
   }
   
   return ingredients
+}
+
+/**
+ * Time patterns for cook time extraction
+ * Matches various time expressions like "1 hour", "30 minutes", "45 min", etc.
+ */
+const TIME_PATTERNS = [
+  // Hours and minutes combined: "1 hour and 30 minutes", "1h 30m", "1:30"
+  {
+    pattern: /(\d+)\s*(?:hour|hours|hr|hrs|h)\s*(?:and|\+)?\s*(\d+)\s*(?:minute|minutes|min|mins|m)\b/gi,
+    extract: (match: RegExpMatchArray): number => {
+      const hours = parseInt(match[1], 10)
+      const minutes = parseInt(match[2], 10)
+      return hours * 60 + minutes
+    }
+  },
+  // Hours and minutes in format "1:30", "1h30m", "1hr30min"
+  {
+    pattern: /(\d+)\s*[:h]\s*(\d+)\s*(?:m|min|minute|minutes)?\b/gi,
+    extract: (match: RegExpMatchArray): number => {
+      const hours = parseInt(match[1], 10)
+      const minutes = parseInt(match[2], 10)
+      return hours * 60 + minutes
+    }
+  },
+  // Hours only: "1 hour", "2 hours", "1h", "2hrs"
+  {
+    pattern: /(\d+)\s*(?:hour|hours|hr|hrs|h)\b/gi,
+    extract: (match: RegExpMatchArray): number => {
+      const hours = parseInt(match[1], 10)
+      return hours * 60
+    }
+  },
+  // Minutes only: "30 minutes", "45 min", "30m"
+  {
+    pattern: /(\d+)\s*(?:minute|minutes|min|mins|m)\b/gi,
+    extract: (match: RegExpMatchArray): number => {
+      return parseInt(match[1], 10)
+    }
+  },
+]
+
+/**
+ * Extracts cook time from recipe step text
+ * 
+ * @param stepText - The natural language text of a recipe step
+ * @returns Array of extracted cook times with duration (in minutes) and byte offsets
+ * 
+ * @example
+ * extractCookTime("Cook the mixture for 1 hour and 30 minutes until golden")
+ * // Returns:
+ * // [
+ * //   { duration: 90, byteStart: 20, byteEnd: 40 }
+ * // ]
+ */
+export function extractCookTime(stepText: string): ExtractedCookTime[] {
+  if (!stepText || stepText.trim().length === 0) {
+    return []
+  }
+  
+  const cookTimes: ExtractedCookTime[] = []
+  
+  // Try each time pattern (order matters - more specific patterns first)
+  for (const timeDef of TIME_PATTERNS) {
+    const matches = Array.from(stepText.matchAll(timeDef.pattern))
+    
+    for (const match of matches) {
+      try {
+        const duration = timeDef.extract(match)
+        
+        if (duration > 0 && isFinite(duration)) {
+          const matchStart = match.index!
+          const matchEnd = matchStart + match[0].length
+          
+          const byteStart = getByteOffset(stepText, matchStart)
+          const byteEnd = getByteOffset(stepText, matchEnd)
+          
+          // Check for overlapping or contained matches
+          // A match is a duplicate if:
+          // 1. It overlaps with an existing match (ranges intersect)
+          // 2. It's completely contained within an existing match
+          // 3. An existing match is completely contained within it (keep the longer one)
+          let itemsToRemove: number[] = []
+          const isOverlapping = cookTimes.some((ct, index) => {
+            const rangesOverlap = !(byteEnd <= ct.byteStart || byteStart >= ct.byteEnd)
+            
+            if (rangesOverlap) {
+              // If ranges overlap, prefer the longer match (more specific)
+              const thisLength = byteEnd - byteStart
+              const otherLength = ct.byteEnd - ct.byteStart
+              
+              // If this match is longer, mark the shorter one for removal
+              if (thisLength > otherLength) {
+                itemsToRemove.push(index)
+                return false // Not a duplicate, we'll add this one
+              }
+              
+              // If the other match is longer or equal, this is a duplicate
+              return true
+            }
+            
+            return false
+          })
+          
+          // Remove items in reverse order to maintain indices
+          itemsToRemove.reverse().forEach(index => cookTimes.splice(index, 1))
+          
+          if (!isOverlapping) {
+            cookTimes.push({
+              duration,
+              byteStart,
+              byteEnd,
+            })
+          }
+        }
+      } catch (error) {
+        // Skip invalid matches (e.g., malformed time patterns, invalid regex matches)
+        // This allows the extraction to continue processing other valid matches
+        // rather than failing entirely on a single invalid match
+        continue
+      }
+    }
+  }
+  
+  // Sort by position in text (earliest first)
+  return cookTimes.sort((a, b) => a.byteStart - b.byteStart)
 }

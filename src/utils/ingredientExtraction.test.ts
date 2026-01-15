@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractIngredients, type ExtractedIngredient } from './ingredientExtraction'
+import { extractIngredients, extractCookTime, type ExtractedIngredient, type ExtractedCookTime } from './ingredientExtraction'
 
 describe('extractIngredients', () => {
   describe('Basic extraction', () => {
@@ -214,7 +214,7 @@ describe('extractIngredients', () => {
       const result = extractIngredients('add 1 cup all-purpose flour')
       
       expect(result).toHaveLength(1)
-      expect(result[0].name).toContain('flour')
+      expect(result[0].name).toBe('flour') // Should normalize to 'flour'
     })
     
     it('should handle case-insensitive unit matching', () => {
@@ -291,6 +291,252 @@ describe('extractIngredients', () => {
       const result = extractIngredients('add 1 cup chopped onions and 2 cloves minced garlic')
       
       expect(result.length).toBeGreaterThanOrEqual(2)
+    })
+  })
+  
+  describe('Ingredient synonym recognition', () => {
+    it('should normalize "all-purpose flour" to "flour"', () => {
+      const result = extractIngredients('add 1 cup all-purpose flour')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('flour')
+    })
+    
+    it('should normalize "all purpose flour" to "flour"', () => {
+      const result = extractIngredients('add 2 cups all purpose flour')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('flour')
+    })
+    
+    it('should normalize "white sugar" to "sugar"', () => {
+      const result = extractIngredients('add 1 cup white sugar')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('sugar')
+    })
+    
+    it('should normalize "granulated sugar" to "sugar"', () => {
+      const result = extractIngredients('add 1/2 cup granulated sugar')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('sugar')
+    })
+    
+    it('should normalize "unsalted butter" to "butter"', () => {
+      const result = extractIngredients('add 1/2 cup unsalted butter')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('butter')
+    })
+    
+    it('should normalize "whole milk" to "milk"', () => {
+      const result = extractIngredients('add 1 cup whole milk')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('milk')
+    })
+    
+    it('should normalize "table salt" to "salt"', () => {
+      const result = extractIngredients('add 1 tsp table salt')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('salt')
+    })
+    
+    it('should normalize "yellow onion" to "onion"', () => {
+      const result = extractIngredients('add 1 yellow onion')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('onion')
+    })
+    
+    it('should normalize "garlic cloves" to "garlic"', () => {
+      const result = extractIngredients('add 2 garlic cloves')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe('garlic')
+    })
+    
+    it('should keep distinct ingredients like "brown sugar" and "red onion"', () => {
+      const result = extractIngredients('add 1 cup brown sugar and 1 red onion')
+      
+      expect(result.length).toBeGreaterThanOrEqual(2)
+      const brownSugar = result.find(ing => ing.name === 'brown sugar')
+      const redOnion = result.find(ing => ing.name === 'red onion')
+      
+      expect(brownSugar).toBeDefined()
+      expect(redOnion).toBeDefined()
+    })
+    
+    it('should handle multiple synonyms in one step', () => {
+      const result = extractIngredients('add 1 cup all-purpose flour, 1/2 cup white sugar, and 1/4 cup unsalted butter')
+      
+      expect(result.length).toBeGreaterThanOrEqual(3)
+      expect(result.find(ing => ing.name === 'flour')).toBeDefined()
+      expect(result.find(ing => ing.name === 'sugar')).toBeDefined()
+      expect(result.find(ing => ing.name === 'butter')).toBeDefined()
+    })
+  })
+})
+
+describe('extractCookTime', () => {
+  describe('Basic cook time extraction', () => {
+    it('should extract cook time from "1 hour"', () => {
+      const result = extractCookTime('Cook the mixture for 1 hour until golden')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 60, // 1 hour = 60 minutes
+      })
+      expect(result[0].byteStart).toBeGreaterThanOrEqual(0)
+      expect(result[0].byteEnd).toBeGreaterThan(result[0].byteStart)
+    })
+    
+    it('should extract cook time from "30 minutes"', () => {
+      const result = extractCookTime('Bake for 30 minutes at 350 degrees')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 30,
+      })
+    })
+    
+    it('should extract cook time from "45 min"', () => {
+      const result = extractCookTime('Simmer for 45 min')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 45,
+      })
+    })
+    
+    it('should extract cook time from "1 hour and 30 minutes"', () => {
+      const result = extractCookTime('Cook the mixture for 1 hour and 30 minutes until golden')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 90, // 1 hour + 30 minutes = 90 minutes
+      })
+    })
+    
+    it('should extract cook time from "2 hours and 15 minutes"', () => {
+      const result = extractCookTime('Roast for 2 hours and 15 minutes')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 135, // 2 hours + 15 minutes = 135 minutes
+      })
+    })
+  })
+  
+  describe('Time format variations', () => {
+    it('should handle "1h 30m" format', () => {
+      const result = extractCookTime('Cook for 1h 30m')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].duration).toBe(90)
+    })
+    
+    it('should handle "1:30" format', () => {
+      const result = extractCookTime('Bake for 1:30')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].duration).toBe(90)
+    })
+    
+    it('should handle "1hr30min" format', () => {
+      const result = extractCookTime('Simmer for 1hr30min')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].duration).toBe(90)
+    })
+    
+    it('should handle "2 hrs" format', () => {
+      const result = extractCookTime('Cook for 2 hrs')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].duration).toBe(120)
+    })
+    
+    it('should handle "45 mins" format', () => {
+      const result = extractCookTime('Bake for 45 mins')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].duration).toBe(45)
+    })
+  })
+  
+  describe('Multiple time references', () => {
+    it('should extract multiple time references', () => {
+      const result = extractCookTime('Cook for 30 minutes, then bake for 1 hour')
+      
+      expect(result.length).toBeGreaterThanOrEqual(2)
+      const thirtyMin = result.find(ct => ct.duration === 30)
+      const oneHour = result.find(ct => ct.duration === 60)
+      
+      expect(thirtyMin).toBeDefined()
+      expect(oneHour).toBeDefined()
+    })
+    
+    it('should handle example from issue description', () => {
+      const result = extractCookTime('Cook the mixture for 1 hour and 30 minutes until golden')
+      
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        duration: 90, // minutes
+      })
+      expect(result[0].byteStart).toBeGreaterThanOrEqual(0)
+      expect(result[0].byteEnd).toBeGreaterThan(result[0].byteStart)
+    })
+  })
+  
+  describe('Byte offset accuracy', () => {
+    it('should return valid byte offsets', () => {
+      const text = 'Cook for 30 minutes'
+      const result = extractCookTime(text)
+      
+      expect(result).toHaveLength(1)
+      expect(result[0].byteStart).toBeGreaterThanOrEqual(0)
+      expect(result[0].byteEnd).toBeLessThanOrEqual(
+        new TextEncoder().encode(text).length
+      )
+      expect(result[0].byteEnd).toBeGreaterThan(result[0].byteStart)
+    })
+    
+    it('should return byte offsets that match the time in text', () => {
+      const text = 'Cook the mixture for 1 hour and 30 minutes until golden'
+      const result = extractCookTime(text)
+      
+      expect(result).toHaveLength(1)
+      const extractedText = new TextDecoder().decode(
+        new TextEncoder().encode(text).slice(result[0].byteStart, result[0].byteEnd)
+      )
+      // The extracted text should contain time-related words
+      expect(extractedText.toLowerCase()).toMatch(/(hour|minute|min|hr|m)/i)
+    })
+  })
+  
+  describe('Edge cases', () => {
+    it('should handle empty string', () => {
+      const result = extractCookTime('')
+      
+      expect(result).toHaveLength(0)
+    })
+    
+    it('should handle text with no time references', () => {
+      const result = extractCookTime('Mix the ingredients together')
+      
+      expect(result).toHaveLength(0)
+    })
+    
+    it('should handle text with numbers that are not times', () => {
+      const result = extractCookTime('Bake at 350 degrees for 30 minutes')
+      
+      // Should only extract the time, not the temperature
+      expect(result.length).toBeGreaterThanOrEqual(1)
+      const timeResult = result.find(ct => ct.duration === 30)
+      expect(timeResult).toBeDefined()
     })
   })
 })
