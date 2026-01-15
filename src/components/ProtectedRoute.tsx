@@ -4,8 +4,8 @@
  */
 
 import { ReactNode } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { Login } from './Login'
 
 export interface ProtectedRouteProps {
   children: ReactNode
@@ -16,6 +16,7 @@ export interface ProtectedRouteProps {
  * Wrapper component that requires authentication
  * Shows login component if not authenticated
  * Shows loading state during auth initialization
+ * Redirects to login route if not authenticated (when using React Router)
  */
 export function ProtectedRoute({ children, fallback }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -32,9 +33,12 @@ export function ProtectedRoute({ children, fallback }: ProtectedRouteProps) {
     )
   }
 
-  // Show login if not authenticated
+  // Redirect to login if not authenticated
   if (!isAuthenticated) {
-    return fallback ?? <Login className="min-h-screen" />
+    if (fallback) {
+      return <>{fallback}</>
+    }
+    return <Navigate to="/login" replace />
   }
 
   // Render children if authenticated

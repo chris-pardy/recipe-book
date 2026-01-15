@@ -1,41 +1,83 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen } from './test/utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
+import { AuthProvider } from './hooks/AuthProvider'
+
+// Mock the auth service
+vi.mock('./services/auth', () => ({
+  initializeOAuthClient: vi.fn().mockResolvedValue({}),
+  startLogin: vi.fn().mockResolvedValue(undefined),
+  handleOAuthCallback: vi.fn().mockResolvedValue(null),
+  initializeFromStorage: vi.fn().mockResolvedValue(null),
+  logout: vi.fn().mockResolvedValue(undefined),
+  toAuthSession: vi.fn((session: { did: string; sub: string }) => ({
+    did: session.did,
+    handle: session.sub,
+  })),
+  saveAuthState: vi.fn(),
+  clearAuthState: vi.fn(),
+}))
+
+// Mock IndexedDB services
+vi.mock('./services/indexeddb', () => ({
+  initDB: vi.fn().mockResolvedValue({}),
+  collectionDB: {
+    getAll: vi.fn().mockResolvedValue([]),
+  },
+  recipeDB: {
+    getAll: vi.fn().mockResolvedValue([]),
+  },
+}))
 
 describe('App', () => {
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <AuthProvider>{children}</AuthProvider>
+  )
+
   beforeEach(() => {
-    // Reset any mocks or state before each test
+    vi.clearAllMocks()
   })
 
-  it('renders the app with initial content', () => {
-    render(<App />)
-    
-    expect(screen.getByText(/vite \+ react/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /count is/i })).toBeInTheDocument()
+  it('renders navigation', () => {
+    render(<App />, { wrapper })
+
+    expect(screen.getByText('Recipe Book')).toBeInTheDocument()
   })
 
-  it('increments count when button is clicked', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    
-    const button = screen.getByRole('button', { name: /count is/i })
-    expect(button).toHaveTextContent('count is 0')
-    
-    await user.click(button)
-    expect(button).toHaveTextContent('count is 1')
-    
-    await user.click(button)
-    expect(button).toHaveTextContent('count is 2')
+  it('renders home page by default', async () => {
+    render(<App />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText(/welcome to recipe book/i)).toBeInTheDocument()
+    })
   })
 
-  it('displays Vite and React logos', () => {
-    render(<App />)
-    
-    const viteLogo = screen.getByAltText('Vite logo')
-    const reactLogo = screen.getByAltText('React logo')
-    
-    expect(viteLogo).toBeInTheDocument()
-    expect(reactLogo).toBeInTheDocument()
+  it('navigates to login page', async () => {
+    render(<App />, { wrapper })
+
+    await waitFor(() => {
+      // Navigation shows a button with "Sign In" text inside a Link
+      const loginButton = screen.getByRole('button', { name: /sign in/i })
+      expect(loginButton).toBeInTheDocument()
+    })
+
+    const loginButton = screen.getByRole('button', { name: /sign in/i })
+    await userEvent.click(loginButton)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sign in with bluesky/i })).toBeInTheDocument()
+    })
+  })
+
+  it('shows 404 page for unknown routes', async () => {
+    // Use window.location to navigate to unknown route
+    window.history.pushState({}, '', '/unknown-route')
+    render(<App />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText('404')).toBeInTheDocument()
+      expect(screen.getByText(/page not found/i)).toBeInTheDocument()
+    })
   })
 })
