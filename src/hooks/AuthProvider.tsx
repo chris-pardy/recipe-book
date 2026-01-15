@@ -1,5 +1,18 @@
 /**
  * Authentication provider component for managing Bluesky OAuth state
+ * 
+ * This provider:
+ * - Initializes the OAuth client on mount
+ * - Handles OAuth callbacks from Bluesky
+ * - Restores existing sessions from storage
+ * - Provides authentication state and methods to child components
+ * 
+ * @example
+ * ```tsx
+ * <AuthProvider>
+ *   <App />
+ * </AuthProvider>
+ * ```
  */
 
 import {
@@ -30,9 +43,14 @@ const initialState: AuthState = {
 }
 
 export interface AuthProviderProps {
+  /** Child components that will have access to the auth context */
   children: ReactNode
 }
 
+/**
+ * AuthProvider component that wraps the app and provides authentication context
+ * @param props - Component props
+ */
 export function AuthProvider({ children }: AuthProviderProps) {
   const [state, setState] = useState<AuthState>(initialState)
   const [oauthSession, setOAuthSession] = useState<OAuthSession | null>(null)
@@ -104,6 +122,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [])
 
+  /**
+   * Start the OAuth login flow
+   * Redirects the user to Bluesky for authorization
+   * @param handle - The Bluesky handle (e.g., username.bsky.social)
+   */
   const login = useCallback(async (handle: string) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }))
     
@@ -120,6 +143,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [])
 
+  /**
+   * Logout and clear the current session
+   * Clears both OAuth session and localStorage state
+   */
   const logout = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }))
     
@@ -149,6 +176,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [oauthSession])
 
+  /**
+   * Manually handle OAuth callback
+   * This is typically called automatically on mount, but can be called manually if needed
+   * @internal This is exposed in the context but usually not needed by consumers
+   */
   const handleCallbackFn = useCallback(async () => {
     setState(prev => ({ ...prev, isLoading: true, error: null }))
     
