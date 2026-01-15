@@ -1,5 +1,6 @@
 /**
- * Component for viewing a recipe with delete functionality for owned recipes
+ * Component for viewing a recipe with delete and edit functionality for owned recipes,
+ * and "Add to My Recipes" functionality for non-owned recipes
  */
 
 import { useState, useEffect } from 'react'
@@ -21,7 +22,8 @@ export interface RecipeViewProps {
 
 /**
  * Component for viewing a recipe
- * Shows delete button only for recipes owned by the current user
+ * Shows edit/delete buttons for recipes owned by the current user
+ * Shows "Add to My Recipes" button for non-owned recipes
  */
 export function RecipeView({ recipeUri }: RecipeViewProps) {
   const { session, isAuthenticated } = useAuth()
@@ -31,6 +33,9 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isAddingToMyRecipes, setIsAddingToMyRecipes] = useState(false)
+  const [isAddedToMyRecipes, setIsAddedToMyRecipes] = useState(false)
+  const [addToMyRecipesError, setAddToMyRecipesError] = useState<string | null>(null)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
 
@@ -126,6 +131,48 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     }
   }
 
+  const handleEditClick = () => {
+    // Navigate to edit route (will be implemented in issue #10)
+    // For now, use a simple navigation approach
+    window.location.href = `/recipe/${encodeURIComponent(recipeUri)}/edit`
+  }
+
+  const handleAddToMyRecipes = async () => {
+    if (!recipe) {
+      return
+    }
+
+    setIsAddingToMyRecipes(true)
+    setAddToMyRecipesError(null)
+
+    try {
+      // Save recipe to IndexedDB (this adds it to the user's local collection)
+      // When collections are fully implemented (issue #12), this can be enhanced
+      // to add the recipe to a default "My Saved Recipes" collection
+      await recipeDB.put(recipeUri, recipe)
+      setIsAddedToMyRecipes(true)
+    } catch (err) {
+      setAddToMyRecipesError(
+        err instanceof Error ? err.message : 'Failed to add recipe to My Recipes',
+      )
+    } finally {
+      setIsAddingToMyRecipes(false)
+    }
+  }
+
+  // Check if recipe is already in My Recipes (IndexedDB)
+  useEffect(() => {
+    if (recipe && !isOwned) {
+      recipeDB.get(recipeUri).then((cachedRecipe) => {
+        if (cachedRecipe) {
+          setIsAddedToMyRecipes(true)
+        }
+      }).catch(() => {
+        // Ignore errors when checking
+      })
+    }
+  }, [recipe, recipeUri, isOwned])
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-4">
@@ -158,15 +205,34 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>{recipe.title}</CardTitle>
-            {isOwned && (
-              <Button
-                variant="destructive"
-                onClick={handleDeleteClick}
-                disabled={isDeleting}
-              >
-                Delete Recipe
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {isOwned ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={handleEditClick}
+                  >
+                    Edit Recipe
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleDeleteClick}
+                    disabled={isDeleting}
+                  >
+                    Delete Recipe
+                  </Button>
+                </>
+              ) : (
+                !isAddedToMyRecipes && (
+                  <Button
+                    onClick={handleAddToMyRecipes}
+                    disabled={isAddingToMyRecipes || !isAuthenticated}
+                  >
+                    {isAddingToMyRecipes ? 'Adding...' : 'Add to My Recipes'}
+                  </Button>
+                )
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -221,6 +287,18 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
             {deleteError && (
               <div className="mt-4 p-4 bg-destructive/10 text-destructive rounded">
                 {deleteError}
+              </div>
+            )}
+
+            {addToMyRecipesError && (
+              <div className="mt-4 p-4 bg-destructive/10 text-destructive rounded">
+                {addToMyRecipesError}
+              </div>
+            )}
+
+            {isAddedToMyRecipes && !isOwned && (
+              <div className="mt-4 p-4 bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-400 rounded">
+                Recipe added to My Recipes
               </div>
             )}
           </div>
