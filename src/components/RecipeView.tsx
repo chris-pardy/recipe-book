@@ -55,6 +55,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [isLoadingSubRecipes, setIsLoadingSubRecipes] = useState(false)
   const [adjustedServings, setAdjustedServings] = useState<number | null>(null)
   const [scaledRecipe, setScaledRecipe] = useState<ScaledRecipe | null>(null)
+  const [scalingError, setScalingError] = useState<string | null>(null)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
   const isForked = isRecipeForked(recipe)
@@ -64,20 +65,28 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   useEffect(() => {
     if (!recipe) {
       setScaledRecipe(null)
+      setScalingError(null)
       return
     }
 
     if (adjustedServings === null || adjustedServings === recipe.servings) {
       setScaledRecipe(null)
+      setScalingError(null)
       return
     }
 
     try {
       const scaled = scaleRecipe(recipe, adjustedServings)
       setScaledRecipe(scaled)
+      setScalingError(null)
     } catch (error) {
       console.error('Failed to scale recipe:', error)
       setScaledRecipe(null)
+      setScalingError(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to adjust serving size. Please try again.'
+      )
     }
   }, [recipe, adjustedServings])
 
@@ -85,6 +94,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   useEffect(() => {
     setAdjustedServings(null)
     setScaledRecipe(null)
+    setScalingError(null)
   }, [recipeUri])
 
   // Load recipe from IndexedDB first, then from PDS if needed
@@ -454,6 +464,17 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
                         setAdjustedServings(null)
                       }
                     }}
+                    onBlur={(e) => {
+                      const value = parseFloat(e.target.value)
+                      // Validate on blur: ensure value is within valid range
+                      if (isNaN(value) || value < 0.25 || value > 100) {
+                        // Reset to original servings if invalid
+                        setAdjustedServings(null)
+                        e.target.value = recipe.servings.toString()
+                      }
+                    }}
+                    aria-label="Adjust serving size"
+                    aria-describedby="servings-description"
                     className="w-24"
                   />
                   {adjustedServings !== null && adjustedServings !== recipe.servings && (
@@ -466,15 +487,23 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
                     </Button>
                   )}
                 </div>
-                {scaledRecipe && (
-                  <p className="text-sm text-muted-foreground">
-                    Original: {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''} • 
-                    Adjusted: {scaledRecipe.adjustedServings} serving{scaledRecipe.adjustedServings !== 1 ? 's' : ''} 
-                    (×{scaledRecipe.multiplier.toFixed(2)})
+                <p id="servings-description" className="text-sm text-muted-foreground">
+                  {scaledRecipe ? (
+                    <>
+                      Original: {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''} • 
+                      Adjusted: {scaledRecipe.adjustedServings} serving{scaledRecipe.adjustedServings !== 1 ? 's' : ''} 
+                      (×{scaledRecipe.multiplier.toFixed(2)})
+                    </>
+                  ) : (
+                    <>
+                      {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </p>
+                {scalingError && (
+                  <p className="text-sm text-destructive mt-1" role="alert">
+                    {scalingError}
                   </p>
-                )}
-                {!scaledRecipe && (
-                  <p>{recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}</p>
                 )}
               </div>
             </div>

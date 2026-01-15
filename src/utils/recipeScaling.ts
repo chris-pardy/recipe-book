@@ -17,6 +17,46 @@ import { aggregateIngredients, aggregatedToRecipeIngredients } from './ingredien
 import { formatAmount } from './unitConversion'
 
 /**
+ * Constants for recipe scaling
+ */
+const ROUNDING_PRECISION = 2 // Decimal places for rounding
+const MIN_SERVING_SIZE = 0.25
+const MAX_SERVING_SIZE = 100
+const POSITION_MATCH_TOLERANCE_PERCENT = 0.1 // 10% of text length
+const MIN_POSITION_MATCH_TOLERANCE = 50 // Minimum tolerance in bytes
+const MAX_POSITION_MATCH_TOLERANCE = 200 // Maximum tolerance in bytes
+
+/**
+ * Converts a byte offset to a character position in a string.
+ * Handles multi-byte Unicode characters correctly by iterating through
+ * the string and tracking byte positions.
+ * 
+ * @param text - The text string
+ * @param byteOffset - The byte offset to convert
+ * @returns The character position corresponding to the byte offset
+ */
+function byteOffsetToCharPosition(text: string, byteOffset: number): number {
+  const encoder = new TextEncoder()
+  let byteCount = 0
+  let charIndex = 0
+  
+  // Iterate through characters, encoding each to track byte position
+  for (let i = 0; i < text.length; i++) {
+    const charBytes = encoder.encode(text[i]).length
+    if (byteCount + charBytes > byteOffset) {
+      // The byte offset falls within this character
+      // Return the character index (we can't split multi-byte characters)
+      return charIndex
+    }
+    byteCount += charBytes
+    charIndex++
+  }
+  
+  // If byte offset is beyond the end, return the last character index
+  return charIndex
+}
+
+/**
  * Scaled recipe view - represents a recipe with adjusted serving size
  * Original recipe data is preserved, only calculated values are adjusted
  */
@@ -51,7 +91,7 @@ export function calculateServingMultiplier(
  * 
  * @param amount - Original amount
  * @param multiplier - Multiplier to apply
- * @returns Scaled amount (rounded to 2 decimal places for display)
+ * @returns Scaled amount (rounded to ROUNDING_PRECISION decimal places for display)
  */
 export function scaleIngredientAmount(
   amount: number | undefined,
@@ -62,8 +102,9 @@ export function scaleIngredientAmount(
   }
   
   const scaled = amount * multiplier
-  // Round to 2 decimal places, but preserve whole numbers
-  return Math.round(scaled * 100) / 100
+  // Round to specified precision, but preserve whole numbers
+  const factor = Math.pow(10, ROUNDING_PRECISION)
+  return Math.round(scaled * factor) / factor
 }
 
 /**
@@ -90,10 +131,6 @@ export function regenerateStepText(
   if (extracted.length === 0) {
     return stepText
   }
-  
-  // Convert byte offsets to character positions
-  const encoder = new TextEncoder()
-  const decoder = new TextDecoder()
   
   // Build a map of character positions to scaled amounts
   const replacements: Array<{ start: number; end: number; replacement: string }> = []
@@ -131,10 +168,9 @@ export function regenerateStepText(
       continue
     }
     
-    // Convert byte offsets to character positions
-    const textBytes = encoder.encode(stepText)
-    const startBytes = textBytes.slice(0, ing.byteStart)
-    const startChar = decoder.decode(startBytes).length
+    // Convert byte offsets to character positions using robust helper function
+    // This handles multi-byte Unicode characters correctly
+    const startChar = byteOffsetToCharPosition(stepText, ing.byteStart)
     
     // Find the amount in the text (number, fraction, or mixed number)
     const afterStart = stepText.slice(startChar)
@@ -199,12 +235,22 @@ export function updateIngredientReferences(
     let matchingIndex: number | undefined
     
     // First try to find by position proximity (within reasonable range)
-    // After scaling, positions may shift, so use a larger tolerance
+    // After scaling, positions may shift, so use a calculated tolerance based on text length
+    // Tolerance is 10% of text length, with min/max bounds
+    const textLength = scaledStepText.length
+    const tolerance = Math.max(
+      MIN_POSITION_MATCH_TOLERANCE,
+      Math.min(
+        MAX_POSITION_MATCH_TOLERANCE,
+        Math.floor(textLength * POSITION_MATCH_TOLERANCE_PERCENT)
+      )
+    )
+    
     for (let i = 0; i < extracted.length; i++) {
       if (usedExtracted.has(i)) continue
       
       const ext = extracted[i]
-      const positionMatch = Math.abs(ext.byteStart - ref.byteStart) < 100 // Allow 100 byte difference
+      const positionMatch = Math.abs(ext.byteStart - ref.byteStart) < tolerance
       
       if (positionMatch) {
         matching = ext
@@ -348,13 +394,20 @@ export function scaleRecipe(
   })
   
   // Add any new ingredients from aggregation that weren't in original
+  // Use a timestamp and counter to ensure unique IDs
+  const timestamp = Date.now()
+  let counter = 0
   for (const agg of reAggregatedIngredients) {
     const exists = finalIngredients.some(
       ing => ing.name.toLowerCase() === agg.name.toLowerCase()
     )
     if (!exists) {
+      // Generate unique ID using timestamp, counter, and random component
+      // The counter ensures uniqueness even if called multiple times in the same millisecond
+      const uniqueId = `scaled-${timestamp}-${counter}-${Math.random().toString(36).substring(2, 9)}`
+      counter++
       finalIngredients.push({
-        id: `scaled-${Date.now()}-${Math.random()}`,
+        id: uniqueId,
         name: agg.name,
         amount: agg.amount,
         unit: agg.unit,
