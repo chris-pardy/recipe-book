@@ -25,6 +25,7 @@ export function Home() {
   const [recipes, setRecipes] = useState<(Recipe & { uri: string })[]>([])
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearchActive, setIsSearchActive] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [selectedCollectionUri, setSelectedCollectionUri] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -195,6 +196,7 @@ export function Home() {
             onResultsChange={handleSearchResultsChange}
             onSearchChange={handleSearchChange}
             onSearchActiveChange={handleSearchActiveChange}
+            onSearchQueryChange={setSearchQuery}
             className="mb-6"
           />
         </div>
@@ -249,7 +251,7 @@ export function Home() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {searchResults.map((result) => {
-                const searchTerms = extractSearchTerms('') // Extract from current search query if available
+                const searchTerms = extractSearchTerms(searchQuery)
                 return (
                   <Card key={result.recipe.uri} className="hover:shadow-md transition-shadow">
                     <CardHeader>
@@ -258,7 +260,7 @@ export function Home() {
                           to={`/recipe/${encodeURIComponent(result.recipe.uri)}`}
                           className="hover:text-blue-600 transition-colors"
                         >
-                          {result.recipe.title}
+                          <HighlightedText text={result.recipe.title} searchTerms={searchTerms} />
                         </Link>
                       </CardTitle>
                     </CardHeader>
@@ -391,6 +393,7 @@ export function Home() {
           onResultsChange={handleSearchResultsChange}
           onSearchChange={handleSearchChange}
           onSearchActiveChange={handleSearchActiveChange}
+          onSearchQueryChange={setSearchQuery}
           className="mb-6"
         />
       </div>
@@ -422,30 +425,33 @@ export function Home() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {searchResults.map((result) => (
-              <Card key={result.recipe.uri} className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle>
-                    <Link
-                      to={`/recipe/${encodeURIComponent(result.recipe.uri)}`}
-                      className="hover:text-blue-600 transition-colors"
-                    >
-                      {result.recipe.title}
-                    </Link>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-500 mb-2">
-                    {result.recipe.servings} serving{result.recipe.servings !== 1 ? 's' : ''}
-                  </p>
-                  {result.matchReasons.length > 0 && (
-                    <p className="text-xs text-gray-400">
-                      Matched by: {result.matchReasons.join(', ')}
+            {searchResults.map((result) => {
+              const searchTerms = extractSearchTerms(searchQuery)
+              return (
+                <Card key={result.recipe.uri} className="hover:shadow-md transition-shadow">
+                  <CardHeader>
+                    <CardTitle>
+                      <Link
+                        to={`/recipe/${encodeURIComponent(result.recipe.uri)}`}
+                        className="hover:text-blue-600 transition-colors"
+                      >
+                        <HighlightedText text={result.recipe.title} searchTerms={searchTerms} />
+                      </Link>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-gray-500 mb-2">
+                      {result.recipe.servings} serving{result.recipe.servings !== 1 ? 's' : ''}
                     </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+                    {result.matchReasons.length > 0 && (
+                      <p className="text-xs text-gray-400">
+                        Matched by: {result.matchReasons.join(', ')}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         )
       ) : displayRecipes.length === 0 ? (

@@ -8,6 +8,13 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Button } from './ui/button'
 import { Card, CardContent } from './ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select'
 import { searchRecipes, parseSearchQuery, type SearchFilters } from '../services/search'
 import { collectionDB } from '../services/indexeddb'
 import { highlightText, extractSearchTerms } from '../utils/searchHighlight'
@@ -23,6 +30,7 @@ export interface RecipeSearchProps {
   onResultsChange: (results: SearchResult[]) => void
   onSearchChange?: (isSearching: boolean) => void
   onSearchActiveChange?: (isActive: boolean) => void
+  onSearchQueryChange?: (query: string) => void
   className?: string
 }
 
@@ -32,6 +40,7 @@ export function RecipeSearch({
   onResultsChange,
   onSearchChange,
   onSearchActiveChange,
+  onSearchQueryChange,
   className,
 }: RecipeSearchProps) {
   const [searchQuery, setSearchQuery] = useState('')
@@ -46,7 +55,10 @@ export function RecipeSearch({
       try {
         const allCollections = await collectionDB.getAll()
         setCollections(allCollections)
+        setError(null)
       } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load collections'
+        setError(errorMessage)
         console.error('Failed to load collections:', err)
       }
     }
@@ -123,7 +135,8 @@ export function RecipeSearch({
     setSearchQuery('')
     setSelectedCollectionUri(null)
     onResultsChange([])
-  }, [onResultsChange])
+    onSearchQueryChange?.('')
+  }, [onResultsChange, onSearchQueryChange])
 
   const hasActiveSearch = searchQuery.trim().length > 0 || selectedCollectionUri !== null
 
@@ -139,7 +152,11 @@ export function RecipeSearch({
                 type="text"
                 placeholder="Search by title or ingredients..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const newQuery = e.target.value
+                  setSearchQuery(newQuery)
+                  onSearchQueryChange?.(newQuery)
+                }}
                 className="flex-1"
               />
               {hasActiveSearch && (
@@ -160,19 +177,22 @@ export function RecipeSearch({
           {collections.length > 0 && (
             <div className="space-y-2">
               <Label htmlFor="collection-filter">Filter by Collection (optional)</Label>
-              <select
-                id="collection-filter"
+              <Select
                 value={selectedCollectionUri || ''}
-                onChange={(e) => setSelectedCollectionUri(e.target.value || null)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onValueChange={(value) => setSelectedCollectionUri(value || null)}
               >
-                <option value="">All Collections</option>
-                {collections.map((collection) => (
-                  <option key={collection.uri} value={collection.uri}>
-                    {collection.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="collection-filter">
+                  <SelectValue placeholder="All Collections" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Collections</SelectItem>
+                  {collections.map((collection) => (
+                    <SelectItem key={collection.uri} value={collection.uri}>
+                      {collection.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 
