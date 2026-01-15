@@ -101,7 +101,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     return () => {
       mounted = false
     }
-  }, [recipeUri, isAuthenticated, session])
+  }, [recipeUri, isAuthenticated, session, isOwned])
 
   const handleDeleteClick = () => {
     setShowDeleteDialog(true)

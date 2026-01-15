@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { AuthProvider } from './hooks/AuthProvider'
-import { BrowserRouter } from 'react-router-dom'
 
 // Mock the auth service
 vi.mock('./services/auth', () => ({

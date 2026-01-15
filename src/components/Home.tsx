@@ -111,12 +111,9 @@ export function Home() {
             <Card key={collection.uri} className="hover:shadow-md transition-shadow">
               <CardHeader>
                 <CardTitle>
-                  <Link
-                    to={`/collection/${encodeURIComponent(collection.uri)}`}
-                    className="hover:text-blue-600 transition-colors"
-                  >
+                  <span className="text-gray-900">
                     {collection.name}
-                  </Link>
+                  </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>

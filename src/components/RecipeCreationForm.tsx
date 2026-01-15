@@ -80,7 +80,7 @@ function generateUUID(): string {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID()
     }
-  } catch (error) {
+  } catch {
     // Fallback for environments where crypto.randomUUID is not available
   }
   // Fallback UUID generation

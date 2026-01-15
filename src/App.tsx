@@ -19,7 +19,13 @@ function RecipeViewWrapper() {
   }
   
   // Decode the URI from the URL parameter
-  const recipeUri = decodeURIComponent(id)
+  let recipeUri: string
+  try {
+    recipeUri = decodeURIComponent(id)
+  } catch {
+    // If URI is malformed, redirect to home
+    return <Navigate to="/" replace />
+  }
   
   return <RecipeView recipeUri={recipeUri} />
 }
