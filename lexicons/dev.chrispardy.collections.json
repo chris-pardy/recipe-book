@@ -1,0 +1,45 @@
+{
+  "lexicon": 1,
+  "id": "dev.chrispardy.collections",
+  "description": "Lexicon definition for recipe collections stored in PDS. Collections allow users to organize recipes into custom groups.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A collection record that groups recipe URIs together. Collections are stored in the user's PDS and can contain references to both owned and forked recipes.",
+      "record": {
+        "type": "object",
+        "required": ["name", "recipeUris", "createdAt", "updatedAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the collection. Must be a non-empty string.",
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of the collection. Provides additional context about the collection's purpose or contents.",
+            "maxLength": 500
+          },
+          "recipeUris": {
+            "type": "array",
+            "description": "Array of recipe record URIs (ATProto URIs) that belong to this collection. URIs must be valid ATProto URIs pointing to recipe records.",
+            "items": {
+              "type": "string"
+            },
+            "maxLength": 1000
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO 8601 timestamp indicating when the collection was created.",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO 8601 timestamp indicating when the collection was last updated.",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}
