@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
 import { createRecipe } from '../services/atproto'
@@ -212,6 +213,7 @@ export function RecipeCreationForm({
   onCancel,
   className,
 }: RecipeCreationFormProps) {
+  const navigate = useNavigate()
   const { isAuthenticated } = useAuth()
   const [title, setTitle] = useState('')
   const [servings, setServings] = useState<number>(1)
@@ -449,9 +451,14 @@ export function RecipeCreationForm({
       
       setSuccess(true)
       
-      // Call success callback immediately - let parent handle timing
+      // Call success callback if provided
       if (onSuccess) {
         onSuccess(uri)
+      } else {
+        // Navigate to the recipe view after a short delay
+        setTimeout(() => {
+          navigate(`/recipe/${encodeURIComponent(uri)}`, { replace: true })
+        }, 1500)
       }
     } catch (err) {
       setError(

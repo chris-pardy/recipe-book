@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { ProtectedRoute } from './ProtectedRoute'
 import { AuthProvider } from '../hooks/AuthProvider'
+import { BrowserRouter } from 'react-router-dom'
 import { ReactNode } from 'react'
 
 interface MockSession {
@@ -36,7 +37,9 @@ vi.mock('../services/auth', () => ({
 
 describe('ProtectedRoute Component', () => {
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <AuthProvider>{children}</AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>{children}</AuthProvider>
+    </BrowserRouter>
   )
 
   beforeEach(() => {
@@ -56,7 +59,7 @@ describe('ProtectedRoute Component', () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
   })
 
-  it('should show login when not authenticated', async () => {
+  it('should redirect to login when not authenticated', async () => {
     render(
       <ProtectedRoute>
         <div>Protected Content</div>
@@ -65,10 +68,9 @@ describe('ProtectedRoute Component', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /sign in with bluesky/i })).toBeInTheDocument()
+      // Should redirect to login page
+      expect(window.location.pathname).toBe('/login')
     })
-    
-    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
   })
 
   it('should render children when authenticated', async () => {

@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
@@ -26,6 +27,7 @@ export interface RecipeViewProps {
  * Shows "Add to My Recipes" button for non-owned recipes
  */
 export function RecipeView({ recipeUri }: RecipeViewProps) {
+  const navigate = useNavigate()
   const { session, isAuthenticated } = useAuth()
   const [recipe, setRecipe] = useState<(Recipe & { uri: string }) | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -124,9 +126,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
       await deleteRecipeComplete(agent, recipeUri)
 
       // Redirect to home after successful deletion
-      // Use history API for better SPA behavior (will be replaced with React Router when added)
-      window.history.pushState({}, '', '/')
-      window.location.reload()
+      navigate('/', { replace: true })
     } catch (err) {
       setDeleteError(
         err instanceof Error ? err.message : 'Failed to delete recipe',
@@ -137,8 +137,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
 
   const handleEditClick = () => {
     // Navigate to edit route (will be implemented in issue #10)
-    // For now, use a simple navigation approach
-    window.location.href = `/recipe/${encodeURIComponent(recipeUri)}/edit`
+    navigate(`/recipe/${encodeURIComponent(recipeUri)}/edit`)
   }
 
   const handleAddToMyRecipes = async () => {
@@ -265,12 +264,12 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
                 <ul className="list-disc list-inside">
                   {recipe.subRecipes.map((subRecipeUri) => (
                     <li key={subRecipeUri}>
-                      <a
-                        href={`/recipe/${encodeURIComponent(subRecipeUri)}`}
+                      <Link
+                        to={`/recipe/${encodeURIComponent(subRecipeUri)}`}
                         className="text-primary hover:underline"
                       >
                         {subRecipeUri}
-                      </a>
+                      </Link>
                     </li>
                   ))}
                 </ul>
