@@ -8,11 +8,13 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
-import { recipeDB } from '../services/indexeddb'
+import { recipeDB, collectionDB } from '../services/indexeddb'
 import { deleteRecipeComplete } from '../services/recipeDeletion'
 import { isRecipeOwned } from '../utils/recipeOwnership'
 import { ensureRecipeInDefaultCollection } from '../services/collections'
 import { getCollectionsForRecipe } from '../services/collections'
+import { createForkMetadata, isRecipeForked, getForkMetadata } from '../utils/recipeForking'
+import { updateCollection } from '../services/atproto'
 import { DeleteRecipeDialog } from './DeleteRecipeDialog'
 import { CollectionManagementDialog } from './CollectionManagementDialog'
 import { Button } from './ui/button'
@@ -44,8 +46,12 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [addToMyRecipesError, setAddToMyRecipesError] = useState<string | null>(null)
   const [collections, setCollections] = useState<(Collection & { uri: string })[]>([])
   const [showCollectionDialog, setShowCollectionDialog] = useState(false)
+  const [isUnforking, setIsUnforking] = useState(false)
+  const [unforkError, setUnforkError] = useState<string | null>(null)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
+  const isForked = isRecipeForked(recipe)
+  const forkMetadata = getForkMetadata(recipe)
 
   // Load recipe from IndexedDB first, then from PDS if needed
   useEffect(() => {
@@ -159,9 +165,12 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     setAddToMyRecipesError(null)
 
     try {
-      // Save recipe to IndexedDB (this adds it to the user's local collection)
-      // Ensure consistency by always including the URI
-      await recipeDB.put(recipeUri, { ...recipe, uri: recipeUri })
+      // Create fork metadata for this non-owned recipe
+      const forkMetadata = createForkMetadata(recipeUri)
+      
+      // Save recipe to IndexedDB with fork metadata (this adds it to the user's local collection)
+      // Ensure consistency by explicitly setting the URI (recipeDB.put will overwrite recipe.uri anyway)
+      await recipeDB.put(recipeUri, { ...recipe, uri: recipeUri }, undefined, false, forkMetadata)
       
       // Add to default collection
       await ensureRecipeInDefaultCollection(recipeUri)
@@ -184,6 +193,72 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     // Reload collections
     const recipeCollections = await getCollectionsForRecipe(recipeUri)
     setCollections(recipeCollections)
+  }
+
+  const handleUnfork = async () => {
+    if (!isAuthenticated || !session || !isForked) {
+      return
+    }
+
+    setIsUnforking(true)
+    setUnforkError(null)
+
+    try {
+      const agent = await getAuthenticatedAgent()
+      if (!agent) {
+        throw new Error('Failed to authenticate')
+      }
+
+      // Remove from all collections
+      const allCollections = await collectionDB.getAll()
+      const collectionsToUpdate = allCollections.filter((collection) =>
+        collection.recipeUris.includes(recipeUri),
+      )
+
+      const failedCollections: string[] = []
+      for (const collection of collectionsToUpdate) {
+        try {
+          const updatedRecipeUris = collection.recipeUris.filter(
+            (uri) => uri !== recipeUri,
+          )
+          
+          // Update in PDS
+          const result = await updateCollection(agent, collection.uri, {
+            recipeUris: updatedRecipeUris,
+          })
+          
+          // Update in IndexedDB
+          await collectionDB.put(collection.uri, {
+            ...collection,
+            recipeUris: updatedRecipeUris,
+          }, result.cid)
+        } catch (error) {
+          const collectionName = collection.name || collection.uri
+          failedCollections.push(collectionName)
+          console.error(`Failed to update collection ${collection.uri}:`, error)
+          // Continue with other collections even if one fails
+        }
+      }
+
+      // Log warning if any collection updates failed, but continue with deletion
+      if (failedCollections.length > 0) {
+        console.warn(
+          `Failed to remove recipe from some collections: ${failedCollections.join(', ')}. ` +
+          'The recipe will still be removed from your local collection.'
+        )
+      }
+
+      // Delete from IndexedDB
+      await recipeDB.delete(recipeUri)
+
+      // Redirect to home after successful unfork
+      navigate('/', { replace: true })
+    } catch (err) {
+      setUnforkError(
+        err instanceof Error ? err.message : 'Failed to unfork recipe',
+      )
+      setIsUnforking(false)
+    }
   }
 
 
@@ -217,8 +292,24 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     <div className="container mx-auto p-4">
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>{recipe.title}</CardTitle>
+            <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <CardTitle>{recipe.title}</CardTitle>
+              {isForked && forkMetadata && (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center px-2 py-1 rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
+                    Forked from{' '}
+                    <Link
+                      to={`/recipe/${encodeURIComponent(forkMetadata.originalRecipeUri)}`}
+                      className="ml-1 underline hover:no-underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      original recipe
+                    </Link>
+                  </span>
+                </div>
+              )}
+            </div>
             <div className="flex gap-2">
               {isOwned ? (
                 <>
@@ -236,6 +327,14 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
                     Delete Recipe
                   </Button>
                 </>
+              ) : isForked ? (
+                <Button
+                  variant="outline"
+                  onClick={handleUnfork}
+                  disabled={isUnforking || !isAuthenticated}
+                >
+                  {isUnforking ? 'Unforking...' : 'Unfork Recipe'}
+                </Button>
               ) : (
                 !isAddedToMyRecipes && (
                   <Button
@@ -310,14 +409,20 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
               </div>
             )}
 
-            {isAddedToMyRecipes && !isOwned && (
+            {unforkError && (
+              <div className="mt-4 p-4 bg-destructive/10 text-destructive rounded">
+                {unforkError}
+              </div>
+            )}
+
+            {isAddedToMyRecipes && !isOwned && !isForked && (
               <div className="mt-4 p-4 bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-400 rounded">
                 Recipe added to My Recipes
               </div>
             )}
 
             {/* Collections */}
-            {collections.length > 0 && (
+            {collections && collections.length > 0 && (
               <div>
                 <h3 className="font-semibold mb-2">Collections</h3>
                 <div className="flex flex-wrap gap-2">

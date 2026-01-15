@@ -47,6 +47,15 @@ export interface Recipe {
 }
 
 /**
+ * Fork metadata for recipes that are copies of recipes owned by other users
+ */
+export interface ForkMetadata {
+  originalRecipeUri: string // URI of the original recipe
+  originalAuthorDid: string // DID of the original recipe author
+  forkedAt: string // ISO timestamp when the recipe was forked
+}
+
+/**
  * ATProto record representation of a Recipe
  */
 export interface RecipeRecord extends Recipe {

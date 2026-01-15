@@ -10,6 +10,7 @@ import { getRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
 import { isRecipeOwned } from '../utils/recipeOwnership'
+import { isRecipeForked } from '../utils/recipeForking'
 import { RecipeCreationForm } from './RecipeCreationForm'
 import { Card, CardContent } from './ui/card'
 import type { Recipe } from '../types/recipe'
@@ -75,6 +76,12 @@ export function RecipeEditWrapper() {
         // Try IndexedDB first
         const cachedRecipe = await recipeDB.get(recipeUri)
         if (cachedRecipe && mounted) {
+          // Check if recipe is forked (forks cannot be edited)
+          if (isRecipeForked(cachedRecipe)) {
+            setError('Forked recipes cannot be edited. Only the original owner can edit recipes.')
+            setIsLoading(false)
+            return
+          }
           setRecipe({ ...cachedRecipe, uri: recipeUri })
           setIsLoading(false)
           return
@@ -93,6 +100,9 @@ export function RecipeEditWrapper() {
 
         if (mounted) {
           const recipeWithUri = { ...recipeRecord, uri: recipeUri }
+          // Note: Recipes from PDS won't have forkMetadata, but we already checked
+          // the cache earlier (lines 77-84) to catch any forked recipes that were
+          // previously cached locally. No need to check again here.
           setRecipe(recipeWithUri)
           // Cache the complete recipe with URI
           await recipeDB.put(recipeUri, recipeWithUri)
