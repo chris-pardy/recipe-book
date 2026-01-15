@@ -381,8 +381,10 @@ describe('collections service', () => {
       // Should resolve without throwing
       await ensureRecipeInDefaultCollection(recipeUri)
       
-      // If we get here, the function didn't throw
-      expect(true).toBe(true)
+      // Verify that no collection operations were attempted
+      expect(agent.getAuthenticatedAgent).toHaveBeenCalled()
+      expect(atproto.createCollection).not.toHaveBeenCalled()
+      expect(atproto.updateCollection).not.toHaveBeenCalled()
     })
   })
 })

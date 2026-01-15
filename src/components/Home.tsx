@@ -48,12 +48,8 @@ export function Home() {
         if (selectedCollectionUri) {
           const collectionRecipes = await recipeDB.getByCollection(selectedCollectionUri)
           setRecipes(collectionRecipes)
-        } else if (allCollections.length === 0) {
-          // If no collections, load all recipes
-          const allRecipes = await recipeDB.getAll()
-          setRecipes(allRecipes)
         } else {
-          // Show all recipes if collections exist but none selected
+          // Show all recipes if no collection selected
           const allRecipes = await recipeDB.getAll()
           setRecipes(allRecipes)
         }
@@ -145,6 +141,7 @@ export function Home() {
 
       setDeleteCollectionUri(null)
       setDeleteCollectionName(null)
+      setIsDeleting(false)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to delete collection'

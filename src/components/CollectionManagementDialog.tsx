@@ -57,6 +57,8 @@ export function CollectionManagementDialog({
       return
     }
 
+    let cancelled = false
+
     async function loadData() {
       try {
         setIsLoading(true)
@@ -64,23 +66,35 @@ export function CollectionManagementDialog({
 
         // Load all collections
         const allCollections = await collectionDB.getAll()
-        setCollections(allCollections)
+        if (!cancelled) {
+          setCollections(allCollections)
+        }
 
         // Load collections for this recipe
         const recipeCols = await getCollectionsForRecipe(recipeUri)
-        setRecipeCollections(recipeCols.map((c) => c.uri))
+        if (!cancelled) {
+          setRecipeCollections(recipeCols.map((c) => c.uri))
+        }
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Failed to load collections',
-        )
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load collections',
+          )
+        }
       } finally {
-        setIsLoading(false)
+        if (!cancelled) {
+          setIsLoading(false)
+        }
       }
     }
 
     loadData()
+
+    return () => {
+      cancelled = true
+    }
   }, [open, isAuthenticated, recipeUri])
 
   const handleToggleCollection = async (collectionUri: string) => {
@@ -92,13 +106,14 @@ export function CollectionManagementDialog({
     setIsUpdating(true)
     setError(null)
 
+    // Capture current state before async operation
+    const isInCollection = recipeCollections.includes(collectionUri)
+
     try {
       const agent = await getAuthenticatedAgent()
       if (!agent) {
         throw new Error('Failed to authenticate')
       }
-
-      const isInCollection = recipeCollections.includes(collectionUri)
 
       if (isInCollection) {
         await removeRecipeFromCollection(agent, collectionUri, recipeUri)
@@ -106,7 +121,7 @@ export function CollectionManagementDialog({
         await addRecipeToCollection(agent, collectionUri, recipeUri)
       }
 
-      // Update local state
+      // Update local state optimistically
       setRecipeCollections((prev) =>
         isInCollection
           ? prev.filter((uri) => uri !== collectionUri)
@@ -118,6 +133,20 @@ export function CollectionManagementDialog({
         onUpdate()
       }
     } catch (err) {
+      // Revert optimistic update on error
+      // Use the captured isInCollection value to determine revert direction
+      setRecipeCollections((prev) => {
+        if (isInCollection) {
+          // Was removed optimistically, add it back
+          if (!prev.includes(collectionUri)) {
+            return [...prev, collectionUri]
+          }
+        } else {
+          // Was added optimistically, remove it
+          return prev.filter((uri) => uri !== collectionUri)
+        }
+        return prev
+      })
       setError(
         err instanceof Error
           ? err.message

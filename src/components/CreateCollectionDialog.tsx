@@ -2,7 +2,7 @@
  * Dialog component for creating a new collection
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -41,6 +41,15 @@ export function CreateCollectionDialog({
   const [description, setDescription] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Reset form when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setName('')
+      setDescription('')
+      setError(null)
+    }
+  }, [open])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

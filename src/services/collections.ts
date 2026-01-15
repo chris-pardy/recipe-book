@@ -162,7 +162,9 @@ export async function addRecipeToCollection(
       if (!pdsCollection) {
         throw new CollectionError('Collection not found', 'NOT_FOUND')
       }
-      // Cache it (cid not available from getCollection, so we pass undefined)
+      // Cache it
+      // Note: getCollection doesn't return CID, so we pass undefined.
+      // The CID will be available on the next update operation.
       await collectionDB.put(collectionUri, pdsCollection, undefined)
     }
 
@@ -217,7 +219,9 @@ export async function removeRecipeFromCollection(
       if (!pdsCollection) {
         throw new CollectionError('Collection not found', 'NOT_FOUND')
       }
-      // Cache it (cid not available from getCollection, so we pass undefined)
+      // Cache it
+      // Note: getCollection doesn't return CID, so we pass undefined.
+      // The CID will be available on the next update operation.
       await collectionDB.put(collectionUri, pdsCollection, undefined)
     }
 
