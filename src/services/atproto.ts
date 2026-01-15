@@ -97,7 +97,7 @@ async function withRetry<T>(
   operation: () => Promise<T>,
   retries = MAX_RETRIES,
 ): Promise<T> {
-  let lastError: unknown
+  let lastError: unknown = new AtProtoError('Unknown error', 'UNKNOWN_ERROR')
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -127,9 +127,24 @@ async function withRetry<T>(
 /**
  * Ensure agent is authenticated
  */
-function ensureAuthenticated(agent: BskyAgent): void {
+function ensureAuthenticated(agent: BskyAgent): asserts agent is BskyAgent & { session: NonNullable<BskyAgent['session']> } {
   if (!agent.session) {
     throw new AuthenticationError()
+  }
+}
+
+/**
+ * Parse ATProto URI into components
+ */
+function parseAtProtoUri(uri: string): { repo: string; collection: string; rkey: string } {
+  const uriParts = uri.replace('at://', '').split('/')
+  if (uriParts.length < 3) {
+    throw new AtProtoError('Invalid URI', 'INVALID_URI')
+  }
+  return {
+    repo: uriParts[0],
+    collection: uriParts[1],
+    rkey: uriParts[2],
   }
 }
 
@@ -184,7 +199,7 @@ export async function createRecipe(
   return withRetry(async () => {
     try {
       const response = await agent.com.atproto.repo.createRecord({
-        repo: agent.session!.did,
+        repo: agent.session.did,
         collection: RECIPE_COLLECTION,
         record: record,
       })
@@ -194,6 +209,10 @@ export async function createRecipe(
         cid: response.cid.toString(),
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 429) {
@@ -220,15 +239,7 @@ export async function getRecipe(
 ): Promise<RecipeRecord | null> {
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid recipe URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== RECIPE_COLLECTION) {
         throw new AtProtoError(
@@ -245,6 +256,10 @@ export async function getRecipe(
 
       return response.value as RecipeRecord
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -253,9 +268,6 @@ export async function getRecipe(
         if (statusCode === 429) {
           throw new RateLimitError()
         }
-      }
-      if (error instanceof NotFoundError) {
-        return null
       }
       throw new AtProtoError(
         error instanceof Error ? error.message : 'Failed to get recipe',
@@ -277,15 +289,7 @@ export async function updateRecipe(
 
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid recipe URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== RECIPE_COLLECTION) {
         throw new AtProtoError(
@@ -320,6 +324,10 @@ export async function updateRecipe(
         cid: response.cid.toString(),
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -351,15 +359,7 @@ export async function deleteRecipe(
 
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid recipe URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== RECIPE_COLLECTION) {
         throw new AtProtoError(
@@ -374,6 +374,10 @@ export async function deleteRecipe(
         rkey,
       })
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -410,7 +414,7 @@ export async function listRecipes(
   return withRetry(async () => {
     try {
       const response = await agent.com.atproto.repo.listRecords({
-        repo: agent.session!.did,
+        repo: agent.session.did,
         collection: RECIPE_COLLECTION,
         limit,
         cursor,
@@ -423,6 +427,10 @@ export async function listRecipes(
         cursor: response.cursor,
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 429) {
@@ -460,7 +468,7 @@ export async function createCollection(
   return withRetry(async () => {
     try {
       const response = await agent.com.atproto.repo.createRecord({
-        repo: agent.session!.did,
+        repo: agent.session.did,
         collection: COLLECTION_COLLECTION,
         record: record,
       })
@@ -470,6 +478,10 @@ export async function createCollection(
         cid: response.cid.toString(),
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 429) {
@@ -498,15 +510,7 @@ export async function getCollection(
 ): Promise<CollectionRecord | null> {
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid collection URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== COLLECTION_COLLECTION) {
         throw new AtProtoError(
@@ -523,6 +527,10 @@ export async function getCollection(
 
       return response.value as CollectionRecord
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -531,9 +539,6 @@ export async function getCollection(
         if (statusCode === 429) {
           throw new RateLimitError()
         }
-      }
-      if (error instanceof NotFoundError) {
-        return null
       }
       throw new AtProtoError(
         error instanceof Error ? error.message : 'Failed to get collection',
@@ -555,15 +560,7 @@ export async function updateCollection(
 
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid collection URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== COLLECTION_COLLECTION) {
         throw new AtProtoError(
@@ -598,6 +595,10 @@ export async function updateCollection(
         cid: response.cid.toString(),
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -631,15 +632,7 @@ export async function deleteCollection(
 
   return withRetry(async () => {
     try {
-      // Parse URI to extract repo and rkey
-      const uriParts = uri.replace('at://', '').split('/')
-      if (uriParts.length < 3) {
-        throw new AtProtoError('Invalid collection URI', 'INVALID_URI')
-      }
-
-      const repo = uriParts[0]
-      const collection = uriParts[1]
-      const rkey = uriParts[2]
+      const { repo, collection, rkey } = parseAtProtoUri(uri)
 
       if (collection !== COLLECTION_COLLECTION) {
         throw new AtProtoError(
@@ -654,6 +647,10 @@ export async function deleteCollection(
         rkey,
       })
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 404) {
@@ -692,7 +689,7 @@ export async function listCollections(
   return withRetry(async () => {
     try {
       const response = await agent.com.atproto.repo.listRecords({
-        repo: agent.session!.did,
+        repo: agent.session.did,
         collection: COLLECTION_COLLECTION,
         limit,
         cursor,
@@ -705,6 +702,10 @@ export async function listCollections(
         cursor: response.cursor,
       }
     } catch (error: unknown) {
+      // If it's already an AtProtoError, re-throw it
+      if (error instanceof AtProtoError) {
+        throw error
+      }
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode
         if (statusCode === 429) {

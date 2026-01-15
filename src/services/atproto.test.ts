@@ -167,6 +167,7 @@ describe('ATProto Service', () => {
       })
 
       it('should handle rate limit errors with retry', async () => {
+        vi.useRealTimers()
         const agent = createAtProtoAgent({ service: 'https://bsky.social' })
         authenticateAgent(agent, mockSession)
 
@@ -180,18 +181,15 @@ describe('ATProto Service', () => {
           .mockRejectedValueOnce({ statusCode: 429 })
           .mockResolvedValueOnce(mockResponse)
 
-        const resultPromise = createRecipe(agent, mockRecipe)
-
-        // Advance timer for retry delay
-        await vi.advanceTimersByTimeAsync(2000)
-
-        const result = await resultPromise
+        const result = await createRecipe(agent, mockRecipe)
 
         expect(result.uri).toBe('at://did:plc:abc123/dev.chrispardy.recipes/123')
         expect(mockCreateRecord).toHaveBeenCalledTimes(2)
+        vi.useFakeTimers()
       })
 
       it('should throw AtProtoError on generic errors', async () => {
+        vi.useRealTimers()
         const agent = createAtProtoAgent({ service: 'https://bsky.social' })
         authenticateAgent(agent, mockSession)
 
@@ -200,6 +198,7 @@ describe('ATProto Service', () => {
         await expect(createRecipe(agent, mockRecipe)).rejects.toThrow(
           AtProtoError,
         )
+        vi.useFakeTimers()
       })
     })
 
@@ -602,17 +601,20 @@ describe('ATProto Service', () => {
         .mockRejectedValueOnce({ statusCode: 429 })
         .mockResolvedValueOnce(mockResponse)
 
-      const resultPromise = createRecipe(agent, mockRecipe)
+      // Mock setTimeout to resolve immediately
+      const originalSetTimeout = global.setTimeout
+      global.setTimeout = vi.fn((fn: () => void) => {
+        Promise.resolve().then(() => fn())
+        return 1 as any
+      }) as any
 
-      // Advance timer for retry delays (exponential backoff)
-      await vi.advanceTimersByTimeAsync(2000) // First retry
-      await vi.advanceTimersByTimeAsync(4000) // Second retry
+      const result = await createRecipe(agent, mockRecipe)
 
-      const result = await resultPromise
+      global.setTimeout = originalSetTimeout
 
       expect(result.uri).toBe('at://did:plc:abc123/dev.chrispardy.recipes/123')
       expect(mockCreateRecord).toHaveBeenCalledTimes(3)
-    })
+    }, 10000)
 
     it('should throw error after max retries', async () => {
       const agent = createAtProtoAgent({ service: 'https://bsky.social' })
@@ -621,15 +623,17 @@ describe('ATProto Service', () => {
       // All retries fail with rate limit
       mockCreateRecord.mockRejectedValue({ statusCode: 429 })
 
-      // Start the operation and immediately catch any errors
-      const resultPromise = createRecipe(agent, mockRecipe).catch(err => err)
+      // Mock setTimeout to resolve immediately
+      const originalSetTimeout = global.setTimeout
+      global.setTimeout = vi.fn((fn: () => void) => {
+        Promise.resolve().then(() => fn())
+        return 1 as any
+      }) as any
 
-      // Advance timers to trigger all retries
-      // Exponential backoff: 2s, 4s, 8s = 14s total
-      await vi.advanceTimersByTimeAsync(15000)
+      // Start the operation and catch any errors
+      const error = await createRecipe(agent, mockRecipe).catch(err => err)
 
-      // Wait for the promise to settle
-      const error = await resultPromise
+      global.setTimeout = originalSetTimeout
 
       // Verify it throws after all retries
       expect(error).toBeInstanceOf(RateLimitError)
