@@ -326,6 +326,11 @@ function findNextIngredient(
 }
 
 /**
+ * Default threshold for duplicate detection in bytes
+ */
+const DEFAULT_DUPLICATE_THRESHOLD = 10
+
+/**
  * Options for ingredient extraction
  */
 export interface ExtractIngredientsOptions {
@@ -356,7 +361,7 @@ export function extractIngredients(
   stepText: string,
   options: ExtractIngredientsOptions = {}
 ): ExtractedIngredient[] {
-  const { duplicateThreshold = 10 } = options
+  const { duplicateThreshold = DEFAULT_DUPLICATE_THRESHOLD } = options
   if (!stepText || stepText.trim().length === 0) {
     return []
   }
@@ -514,22 +519,18 @@ export function extractCookTime(stepText: string): ExtractedCookTime[] {
           // 1. It overlaps with an existing match (ranges intersect)
           // 2. It's completely contained within an existing match
           // 3. An existing match is completely contained within it (keep the longer one)
-          const isOverlapping = cookTimes.some(ct => {
+          let itemsToRemove: number[] = []
+          const isOverlapping = cookTimes.some((ct, index) => {
             const rangesOverlap = !(byteEnd <= ct.byteStart || byteStart >= ct.byteEnd)
-            const thisContainsOther = byteStart <= ct.byteStart && byteEnd >= ct.byteEnd
-            const otherContainsThis = ct.byteStart <= byteStart && ct.byteEnd >= byteEnd
             
             if (rangesOverlap) {
               // If ranges overlap, prefer the longer match (more specific)
               const thisLength = byteEnd - byteStart
               const otherLength = ct.byteEnd - ct.byteStart
               
-              // If this match is longer, remove the shorter one
+              // If this match is longer, mark the shorter one for removal
               if (thisLength > otherLength) {
-                const index = cookTimes.indexOf(ct)
-                if (index > -1) {
-                  cookTimes.splice(index, 1)
-                }
+                itemsToRemove.push(index)
                 return false // Not a duplicate, we'll add this one
               }
               
@@ -540,6 +541,9 @@ export function extractCookTime(stepText: string): ExtractedCookTime[] {
             return false
           })
           
+          // Remove items in reverse order to maintain indices
+          itemsToRemove.reverse().forEach(index => cookTimes.splice(index, 1))
+          
           if (!isOverlapping) {
             cookTimes.push({
               duration,
@@ -549,7 +553,9 @@ export function extractCookTime(stepText: string): ExtractedCookTime[] {
           }
         }
       } catch (error) {
-        // Skip invalid matches
+        // Skip invalid matches (e.g., malformed time patterns, invalid regex matches)
+        // This allows the extraction to continue processing other valid matches
+        // rather than failing entirely on a single invalid match
         continue
       }
     }
