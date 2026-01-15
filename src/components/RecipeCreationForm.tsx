@@ -9,6 +9,7 @@ import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } f
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
+import { aggregateIngredients as aggregateIngredientsUtil, aggregatedToRecipeIngredients } from '../utils/ingredientAggregation'
 import { createRecipe, updateRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
@@ -95,51 +96,12 @@ function generateUUID(): string {
 }
 
 /**
- * Determines if two ingredients should have their amounts combined
- * @param existing - The existing aggregated ingredient
- * @param extracted - The newly extracted ingredient
- * @returns True if amounts should be combined
- */
-function shouldCombineAmounts(
-  existing: AggregatedIngredient,
-  extracted: ExtractedIngredient
-): boolean {
-  return (
-    existing.unit === extracted.unit &&
-    existing.amount !== undefined &&
-    extracted.amount !== undefined
-  )
-}
-
-/**
- * Updates an existing ingredient with data from an extracted ingredient
- * @param existing - The existing aggregated ingredient to update
- * @param extracted - The newly extracted ingredient
- */
-function updateIngredientAmounts(
-  existing: AggregatedIngredient,
-  extracted: ExtractedIngredient
-): void {
-  if (shouldCombineAmounts(existing, extracted)) {
-    existing.amount = (existing.amount || 0) + (extracted.amount || 0)
-  } else if (!existing.unit && extracted.unit) {
-    // Update with unit if existing doesn't have one
-    existing.unit = extracted.unit
-    existing.amount = extracted.amount
-  } else if (existing.unit && !extracted.unit && existing.amount) {
-    // Keep existing unit if new one doesn't have unit
-    // Don't update amount
-  }
-  existing.extractedFrom.push(extracted)
-}
-
-/**
- * Aggregate ingredients from all steps, combining duplicates
+ * Aggregate ingredients from all steps, combining duplicates with unit conversion
  * 
  * This function processes recipe steps and manual ingredients, extracting
  * ingredient information and combining duplicates based on name matching.
- * When the same ingredient appears multiple times with the same unit,
- * amounts are combined. Otherwise, ingredients are kept separate.
+ * Uses unit conversion utilities to combine ingredients within the same unit system,
+ * but keeps metric and imperial units separate.
  * 
  * @param steps - Array of recipe step objects with text
  * @param manualIngredients - Array of manually added ingredients
@@ -149,39 +111,96 @@ function aggregateIngredients(
   steps: FormStep[],
   manualIngredients: AggregatedIngredient[]
 ): AggregatedIngredient[] {
-  const ingredientMap = new Map<string, AggregatedIngredient>()
+  // Extract all ingredients from steps
+  const allExtracted: ExtractedIngredient[] = []
   
-  // Add manual ingredients first
-  for (const manual of manualIngredients) {
-    const key = manual.name.toLowerCase()
-    ingredientMap.set(key, { ...manual })
-  }
-  
-  // Extract and aggregate from steps
   for (const step of steps) {
     if (!step.text.trim()) continue
-    
     const extracted = extractIngredients(step.text)
+    allExtracted.push(...extracted)
+  }
+  
+  // Use the new aggregation utility
+  const aggregated = aggregateIngredientsUtil(allExtracted)
+  
+  // Convert to form's AggregatedIngredient format
+  // This handles multiple unit systems by creating separate entries
+  const formIngredients: AggregatedIngredient[] = []
+  
+  for (const agg of aggregated) {
+    // Convert aggregated entries to recipe ingredients format
+    // This will create separate entries for different unit systems
+    const recipeIngredients = aggregatedToRecipeIngredients([agg])
     
-    for (const extractedIng of extracted) {
-      const key = extractedIng.name.toLowerCase()
-      const existing = ingredientMap.get(key)
-      
-      if (existing) {
-        updateIngredientAmounts(existing, extractedIng)
-      } else {
-        ingredientMap.set(key, {
-          id: generateUUID(),
-          name: extractedIng.name,
-          amount: extractedIng.amount,
-          unit: extractedIng.unit,
-          extractedFrom: [extractedIng],
-        })
-      }
+    // Create form ingredients from recipe ingredients
+    for (const recipeIng of recipeIngredients) {
+      // Use all extracted ingredients for this name (they're already aggregated)
+      formIngredients.push({
+        id: generateUUID(),
+        name: recipeIng.name,
+        amount: recipeIng.amount,
+        unit: recipeIng.unit,
+        extractedFrom: agg.extractedFrom,
+      })
     }
   }
   
-  return Array.from(ingredientMap.values())
+  // Merge with manual ingredients
+  const manualMap = new Map<string, AggregatedIngredient[]>()
+  for (const manual of manualIngredients) {
+    const key = manual.name.toLowerCase()
+    if (!manualMap.has(key)) {
+      manualMap.set(key, [])
+    }
+    manualMap.get(key)!.push(manual)
+  }
+  
+  // Merge manual ingredients with extracted ones
+  const result: AggregatedIngredient[] = []
+  const processedKeys = new Set<string>()
+  
+  // Add form ingredients (from extraction)
+  for (const formIng of formIngredients) {
+    const key = formIng.name.toLowerCase()
+    processedKeys.add(key)
+    
+    const manualList = manualMap.get(key)
+    if (manualList && manualList.length > 0) {
+      // Try to merge with manual ingredients
+      let merged = false
+      for (const manual of manualList) {
+        // If same unit, combine amounts
+        if (manual.unit === formIng.unit && manual.amount !== undefined && formIng.amount !== undefined) {
+          result.push({
+            id: manual.id,
+            name: manual.name,
+            amount: (manual.amount || 0) + formIng.amount,
+            unit: formIng.unit,
+            extractedFrom: [...manual.extractedFrom, ...formIng.extractedFrom],
+          })
+          merged = true
+          break
+        }
+      }
+      
+      if (!merged) {
+        // Different units - keep both
+        result.push(formIng)
+        result.push(...manualList)
+      }
+      
+      manualMap.delete(key)
+    } else {
+      result.push(formIng)
+    }
+  }
+  
+  // Add remaining manual ingredients that weren't merged
+  for (const manualList of manualMap.values()) {
+    result.push(...manualList)
+  }
+  
+  return result
 }
 
 /**
@@ -463,7 +482,12 @@ export function RecipeCreationForm({
           const extracted = extractIngredients(step.text)
           const ingredientReferences = extracted.map(extractedIng => {
             // Find the aggregated ingredient this belongs to
+            // Match by name and unit to handle multiple unit systems correctly
             const aggregated = aggregatedIngredients.find(
+              agg => agg.name.toLowerCase() === extractedIng.name.toLowerCase() &&
+                     agg.unit === extractedIng.unit
+            ) || aggregatedIngredients.find(
+              // Fallback: match by name only if no unit match
               agg => agg.name.toLowerCase() === extractedIng.name.toLowerCase()
             )
             
