@@ -358,6 +358,9 @@ export function RecipeCreationForm({
     setSubRecipeError(null)
 
     try {
+      // Note: Loading all recipes with getAll() could be slow with many recipes.
+      // Consider implementing pagination, a more efficient search index, or limiting
+      // initial results and loading more on scroll for better performance.
       const allRecipes = await recipeDB.getAll()
       const queryLower = query.toLowerCase().trim()
       
@@ -372,9 +375,16 @@ export function RecipeCreationForm({
 
       setSubRecipeSearchResults(matchingRecipes.slice(0, 10)) // Limit to 10 results
     } catch (err) {
-      setSubRecipeError(
-        err instanceof Error ? err.message : 'Failed to search recipes'
-      )
+      // Provide more specific error messages for different failure types
+      if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+        setSubRecipeError('Storage quota exceeded. Please free up some space.')
+      } else if (err instanceof DOMException && err.name === 'InvalidStateError') {
+        setSubRecipeError('Database connection error. Please refresh the page.')
+      } else if (err instanceof Error) {
+        setSubRecipeError(`Failed to search recipes: ${err.message}`)
+      } else {
+        setSubRecipeError('Failed to search recipes. Please try again.')
+      }
     } finally {
       setIsSearchingSubRecipes(false)
     }
@@ -512,8 +522,10 @@ export function RecipeCreationForm({
 
   const handleAddSubRecipe = async (subRecipeUri: string) => {
     // Check for circular reference
-    // If editing, use the actual recipe URI; if creating, we can't check against self
-    // but we can still check if the sub-recipe would create a cycle
+    // If editing, we can check for circular references using the recipe URI.
+    // When creating a new recipe, we don't have a URI yet, so circular reference
+    // checks are skipped during creation. The check will be performed after the
+    // recipe is created if needed (though this would require a different UX flow).
     if (recipeUri) {
       const wouldCreateCircular = await wouldCreateCircularReference(
         recipeUri,
@@ -524,13 +536,10 @@ export function RecipeCreationForm({
         setSubRecipeError('Adding this recipe would create a circular reference')
         return
       }
-    } else {
-      // When creating, check if sub-recipe references itself (self-reference)
-      if (subRecipeUri === recipeUri) {
-        setSubRecipeError('Cannot add recipe as its own sub-recipe')
-        return
-      }
     }
+    // Note: Self-reference check during creation is not possible since we don't
+    // have a recipe URI yet. This is acceptable as users can't add a recipe as
+    // its own sub-recipe during creation (the recipe doesn't exist yet).
 
     // Add sub-recipe
     setSubRecipes(prev => {
