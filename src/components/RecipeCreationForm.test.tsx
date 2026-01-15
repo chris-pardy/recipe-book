@@ -12,6 +12,7 @@ vi.mock('../services/agent', () => ({
 
 vi.mock('../services/atproto', () => ({
   createRecipe: vi.fn(),
+  updateRecipe: vi.fn(),
 }))
 
 vi.mock('../services/indexeddb', () => ({
@@ -638,6 +639,241 @@ describe('RecipeCreationForm Component', () => {
     // Should show aggregated flour amount
     await waitFor(() => {
       expect(screen.getByText(/300.*g.*flour/i)).toBeInTheDocument()
+    })
+  })
+
+  describe('Edit Mode', () => {
+    const mockInitialRecipe: Recipe = {
+      title: 'Original Recipe',
+      servings: 4,
+      ingredients: [
+        { id: '1', name: 'flour', amount: 240, unit: 'g' },
+        { id: '2', name: 'sugar', amount: 60, unit: 'g' },
+      ],
+      steps: [
+        { id: '1', text: 'Mix 240g flour and 60g sugar', order: 0 },
+        { id: '2', text: 'Bake at 350F', order: 1 },
+      ],
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+    }
+
+    const mockRecipeUri = 'at://did:test:123/dev.chrispardy.recipes/abc123'
+
+    beforeEach(() => {
+      ;(atprotoService.updateRecipe as any).mockResolvedValue({
+        uri: mockRecipeUri,
+        cid: 'cid123',
+      })
+    })
+
+    it('should pre-populate form with initial recipe data', async () => {
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/edit recipe/i)).toBeInTheDocument()
+      })
+
+      expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('4')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Mix 240g flour and 60g sugar')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Bake at 350F')).toBeInTheDocument()
+    })
+
+    it('should show "Edit Recipe" title in edit mode', async () => {
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/edit recipe/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should show "Update Recipe" button in edit mode', async () => {
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /update recipe/i })).toBeInTheDocument()
+      })
+    })
+
+    it('should update recipe when form is submitted in edit mode', async () => {
+      const user = userEvent.setup()
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      })
+
+      // Modify the title
+      const titleInput = screen.getByDisplayValue('Original Recipe')
+      await user.clear(titleInput)
+      await user.type(titleInput, 'Updated Recipe')
+
+      // Submit
+      const submitButton = screen.getByRole('button', { name: /update recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(atprotoService.updateRecipe).toHaveBeenCalledWith(
+          mockAgent,
+          mockRecipeUri,
+          expect.objectContaining({
+            title: 'Updated Recipe',
+            servings: 4,
+          }),
+        )
+      })
+    })
+
+    it('should update IndexedDB cache after successful update', async () => {
+      const user = userEvent.setup()
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      })
+
+      const submitButton = screen.getByRole('button', { name: /update recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(indexeddbService.recipeDB.put).toHaveBeenCalled()
+      })
+
+      const putCall = (indexeddbService.recipeDB.put as any).mock.calls[0]
+      expect(putCall[0]).toBe(mockRecipeUri)
+      expect(putCall[1]).toMatchObject({
+        title: 'Original Recipe',
+        servings: 4,
+      })
+      expect(putCall[1].updatedAt).toBeDefined()
+    })
+
+    it('should show success message after successful update', async () => {
+      const user = userEvent.setup()
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      })
+
+      const submitButton = screen.getByRole('button', { name: /update recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/recipe updated successfully/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should re-extract ingredients when steps are modified', async () => {
+      const user = userEvent.setup()
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Mix 240g flour and 60g sugar')).toBeInTheDocument()
+      })
+
+      // Modify a step to add a new ingredient
+      const stepTextarea = screen.getByDisplayValue('Mix 240g flour and 60g sugar')
+      await user.clear(stepTextarea)
+      await user.type(stepTextarea, 'Mix 240g flour, 60g sugar, and 2 eggs')
+
+      // Wait for ingredient extraction
+      await waitFor(() => {
+        expect(screen.getByText(/egg/i)).toBeInTheDocument()
+      }, { timeout: 2000 })
+    })
+
+    it('should handle errors during update', async () => {
+      const user = userEvent.setup()
+      ;(atprotoService.updateRecipe as any).mockRejectedValueOnce(new Error('Update failed'))
+
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      })
+
+      const submitButton = screen.getByRole('button', { name: /update recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/update failed/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should preserve createdAt when updating', async () => {
+      const user = userEvent.setup()
+      render(
+        <RecipeCreationForm
+          recipeUri={mockRecipeUri}
+          initialRecipe={mockInitialRecipe}
+        />,
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue('Original Recipe')).toBeInTheDocument()
+      })
+
+      const submitButton = screen.getByRole('button', { name: /update recipe/i })
+      await user.click(submitButton)
+
+      await waitFor(() => {
+        expect(indexeddbService.recipeDB.put).toHaveBeenCalled()
+      })
+
+      const putCall = (indexeddbService.recipeDB.put as any).mock.calls[0]
+      expect(putCall[1].createdAt).toBe('2024-01-01T00:00:00Z')
+      expect(putCall[1].updatedAt).not.toBe('2024-01-01T00:00:00Z')
     })
   })
 })

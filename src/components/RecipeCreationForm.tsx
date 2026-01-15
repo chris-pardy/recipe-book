@@ -9,7 +9,7 @@ import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } f
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
-import { createRecipe } from '../services/atproto'
+import { createRecipe, updateRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
 import { cn } from '../lib/utils'
@@ -21,6 +21,10 @@ export interface RecipeCreationFormProps {
   /** Callback when form is cancelled */
   onCancel?: () => void
   className?: string
+  /** Recipe URI when editing an existing recipe */
+  recipeUri?: string
+  /** Initial recipe data for edit mode */
+  initialRecipe?: Recipe
 }
 
 interface FormStep {
@@ -212,13 +216,46 @@ export function RecipeCreationForm({
   onSuccess,
   onCancel,
   className,
+  recipeUri,
+  initialRecipe,
 }: RecipeCreationFormProps) {
   const navigate = useNavigate()
   const { isAuthenticated } = useAuth()
-  const [title, setTitle] = useState('')
-  const [servings, setServings] = useState<number>(1)
-  const [steps, setSteps] = useState<FormStep[]>([{ id: generateUUID(), text: '' }])
-  const [manualIngredients, setManualIngredients] = useState<AggregatedIngredient[]>([])
+  const isEditMode = !!recipeUri && !!initialRecipe
+  
+  // Initialize form state from initialRecipe if in edit mode
+  const [title, setTitle] = useState(initialRecipe?.title || '')
+  const [servings, setServings] = useState<number>(initialRecipe?.servings || 1)
+  const [steps, setSteps] = useState<FormStep[]>(() => {
+    if (initialRecipe?.steps && initialRecipe.steps.length > 0) {
+      return initialRecipe.steps.map(step => ({
+        id: step.id,
+        text: step.text,
+      }))
+    }
+    return [{ id: generateUUID(), text: '' }]
+  })
+  const [manualIngredients, setManualIngredients] = useState<AggregatedIngredient[]>(() => {
+    if (initialRecipe?.ingredients) {
+      // Convert recipe ingredients to aggregated ingredients
+      // Only include ingredients that weren't extracted from steps
+      return initialRecipe.ingredients
+        .filter(ing => {
+          // Check if this ingredient appears in any step
+          const stepTexts = initialRecipe.steps.map(s => s.text).join(' ')
+          const extracted = extractIngredients(stepTexts)
+          return !extracted.some(ext => ext.name.toLowerCase() === ing.name.toLowerCase())
+        })
+        .map(ing => ({
+          id: ing.id,
+          name: ing.name,
+          amount: ing.amount,
+          unit: ing.unit,
+          extractedFrom: [],
+        }))
+    }
+    return []
+  })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -439,15 +476,36 @@ export function RecipeCreationForm({
         steps: recipeSteps,
       }
       
-      const { uri, cid } = await createRecipe(agent, recipeData)
+      let uri: string
+      let cid: string
       
-      // Cache in IndexedDB
-      const recipe: Recipe = {
-        ...recipeData,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      if (isEditMode && recipeUri) {
+        // Update existing recipe
+        const result = await updateRecipe(agent, recipeUri, recipeData)
+        uri = result.uri
+        cid = result.cid
+        
+        // Update IndexedDB cache
+        const updatedRecipe: Recipe = {
+          ...recipeData,
+          createdAt: initialRecipe?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        await recipeDB.put(uri, updatedRecipe, cid, false)
+      } else {
+        // Create new recipe
+        const result = await createRecipe(agent, recipeData)
+        uri = result.uri
+        cid = result.cid
+        
+        // Cache in IndexedDB
+        const recipe: Recipe = {
+          ...recipeData,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        await recipeDB.put(uri, recipe, cid, false)
       }
-      await recipeDB.put(uri, recipe, cid, false)
       
       setSuccess(true)
       
@@ -473,10 +531,10 @@ export function RecipeCreationForm({
       <div className={cn('container mx-auto p-4 max-w-2xl', className)}>
         <div className="rounded-lg bg-green-50 border border-green-200 p-6 text-center">
           <h2 className="text-xl font-semibold text-green-800 mb-2">
-            Recipe Created Successfully!
+            Recipe {isEditMode ? 'Updated' : 'Created'} Successfully!
           </h2>
           <p className="text-green-700">
-            Your recipe has been saved and is now available.
+            Your recipe has been {isEditMode ? 'updated' : 'saved'} and is now available.
           </p>
         </div>
       </div>
@@ -487,7 +545,9 @@ export function RecipeCreationForm({
     <div className={cn('container mx-auto p-4 max-w-2xl', className)}>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">Create New Recipe</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-6">
+            {isEditMode ? 'Edit Recipe' : 'Create New Recipe'}
+          </h1>
         </div>
         
         {/* Title */}
@@ -745,7 +805,7 @@ export function RecipeCreationForm({
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-busy={isSubmitting}
           >
-            {isSubmitting ? 'Saving...' : 'Create Recipe'}
+            {isSubmitting ? 'Saving...' : isEditMode ? 'Update Recipe' : 'Create Recipe'}
           </button>
         </div>
       </form>

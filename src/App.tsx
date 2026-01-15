@@ -4,6 +4,7 @@ import { Home } from './components/Home'
 import { Login } from './components/Login'
 import { RecipeCreationForm } from './components/RecipeCreationForm'
 import { RecipeView } from './components/RecipeView'
+import { RecipeEditWrapper } from './components/RecipeEditWrapper'
 import { NotFound } from './components/NotFound'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import './App.css'
@@ -57,6 +58,16 @@ function App() {
             <Route
               path="/recipe/:id"
               element={<RecipeViewWrapper />}
+            />
+            
+            {/* Recipe edit route - protected */}
+            <Route
+              path="/recipe/:id/edit"
+              element={
+                <ProtectedRoute>
+                  <RecipeEditWrapper />
+                </ProtectedRoute>
+              }
             />
             
             {/* 404 route - must be last */}
