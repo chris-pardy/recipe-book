@@ -61,7 +61,16 @@ function parseFraction(fractionStr: string): number {
     const whole = parseInt(mixedMatch[1], 10)
     const numerator = parseInt(mixedMatch[2], 10)
     const denominator = parseInt(mixedMatch[3], 10)
-    return whole + (numerator / denominator)
+    
+    if (denominator === 0) {
+      throw new Error(`Invalid fraction format: denominator cannot be zero in "${fractionStr}"`)
+    }
+    
+    const result = whole + (numerator / denominator)
+    if (isNaN(result) || !isFinite(result)) {
+      throw new Error(`Invalid fraction format: "${fractionStr}"`)
+    }
+    return result
   }
   
   // Handle simple fractions like "1/2"
@@ -69,17 +78,35 @@ function parseFraction(fractionStr: string): number {
   if (simpleMatch) {
     const numerator = parseInt(simpleMatch[1], 10)
     const denominator = parseInt(simpleMatch[2], 10)
-    return numerator / denominator
+    
+    if (denominator === 0) {
+      throw new Error(`Invalid fraction format: denominator cannot be zero in "${fractionStr}"`)
+    }
+    
+    const result = numerator / denominator
+    if (isNaN(result) || !isFinite(result)) {
+      throw new Error(`Invalid fraction format: "${fractionStr}"`)
+    }
+    return result
   }
   
-  return parseFloat(fractionStr)
+  const result = parseFloat(fractionStr)
+  if (isNaN(result) || !isFinite(result)) {
+    throw new Error(`Invalid fraction format: "${fractionStr}"`)
+  }
+  return result
 }
 
 /**
  * Helper function to calculate byte offset for a character index
+ * Uses a cached encoder for better performance with repeated calls
  */
+let cachedEncoder: TextEncoder | null = null
 function getByteOffset(text: string, charIndex: number): number {
-  return new TextEncoder().encode(text.slice(0, charIndex)).length
+  if (!cachedEncoder) {
+    cachedEncoder = new TextEncoder()
+  }
+  return cachedEncoder.encode(text.slice(0, charIndex)).length
 }
 
 /**
@@ -111,7 +138,15 @@ function findNextIngredient(
   
   const amountStart = startIndex + amountMatch.index!
   const amountEnd = amountStart + amountMatch[1].length
-  const amount = parseFraction(amountMatch[1])
+  
+  // Parse the amount, handling invalid fraction formats gracefully
+  let amount: number
+  try {
+    amount = parseFraction(amountMatch[1])
+  } catch (error) {
+    // Skip invalid fraction formats
+    return null
+  }
   
   // Look for unit after amount (skip whitespace)
   const afterAmountText = text.slice(amountEnd)
@@ -157,8 +192,10 @@ function findNextIngredient(
     return null
   }
   
-  // Find where name ends (at comma, "and", "or", next number, or end)
-  const nameEndMatch = nameText.match(/\s*(?:,|\band\b|\bor\b|\d|$)/i)
+  // Find where name ends (at comma, "and", "or", next number followed by space/unit, or end)
+  // Use lookahead to avoid stopping at numbers that are part of the ingredient name
+  // (e.g., "2% milk" or "80/20 ground beef")
+  const nameEndMatch = nameText.match(/\s*(?:,|\band\b|\bor\b|(?=\d+\s*(?:g|kg|ml|l|cup|tbsp|tsp|oz|lb|%|$))|$)/i)
   const nameLength = nameEndMatch ? nameEndMatch.index! : nameText.length
   const name = nameText.slice(0, nameLength).trim()
   
@@ -179,9 +216,22 @@ function findNextIngredient(
 }
 
 /**
+ * Options for ingredient extraction
+ */
+export interface ExtractIngredientsOptions {
+  /**
+   * Threshold for duplicate detection in bytes.
+   * Ingredients with the same name, amount, and unit within this distance are considered duplicates.
+   * Default: 10 bytes
+   */
+  duplicateThreshold?: number
+}
+
+/**
  * Main function to extract ingredients from natural language step text
  * 
  * @param stepText - The natural language text of a recipe step
+ * @param options - Optional configuration for extraction behavior
  * @returns Array of extracted ingredients with amounts, units, names, and byte offsets
  * 
  * @example
@@ -192,7 +242,11 @@ function findNextIngredient(
  * //   { name: 'sugar', amount: 60, unit: 'g', byteStart: 18, byteEnd: 24 }
  * // ]
  */
-export function extractIngredients(stepText: string): ExtractedIngredient[] {
+export function extractIngredients(
+  stepText: string,
+  options: ExtractIngredientsOptions = {}
+): ExtractedIngredient[] {
+  const { duplicateThreshold = 10 } = options
   if (!stepText || stepText.trim().length === 0) {
     return []
   }
@@ -218,7 +272,7 @@ export function extractIngredients(stepText: string): ExtractedIngredient[] {
       ing => ing.name.toLowerCase() === ingredient.name.toLowerCase() &&
              ing.amount === ingredient.amount &&
              ing.unit === ingredient.unit &&
-             Math.abs(ing.byteStart - byteStart) < 10 // Same general area
+             Math.abs(ing.byteStart - byteStart) < duplicateThreshold
     )
     
     if (!isDuplicate) {
@@ -238,9 +292,11 @@ export function extractIngredients(stepText: string): ExtractedIngredient[] {
   // If no ingredients found with amounts, try to find ingredients without amounts
   if (ingredients.length === 0) {
     // Look for action verb + ingredient name patterns
+    // Use matchAll for better performance and clarity
     const actionVerbPattern = /\b(add|mix|stir|season|sprinkle|drizzle|garnish|top|use|include|combine)\s+([^,]+?)(?=\s*(?:,|\band\b|\bor\b|\d|$))/gi
-    let actionMatch
-    while ((actionMatch = actionVerbPattern.exec(stepText)) !== null) {
+    const matches = Array.from(stepText.matchAll(actionVerbPattern))
+    
+    for (const actionMatch of matches) {
       const name = actionMatch[2].trim()
       // Skip if it's an action verb or common word
       if (name.length > 0 && name.length < 50 && !ACTION_VERBS.has(name.toLowerCase())) {

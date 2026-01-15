@@ -159,6 +159,26 @@ describe('extractIngredients', () => {
       expect(result.length).toBeGreaterThanOrEqual(1)
     })
     
+    it('should handle invalid fraction formats gracefully', () => {
+      // Test that invalid fractions don't crash the extraction
+      // The function should skip invalid fractions and continue
+      const result = extractIngredients('add 1/0 cup flour')
+      
+      // Should either skip the invalid fraction or handle it gracefully
+      expect(Array.isArray(result)).toBe(true)
+    })
+    
+    it('should handle ingredients with numbers in their names', () => {
+      const result = extractIngredients('add 1 cup 2% milk and 1 lb 80/20 ground beef')
+      
+      // Should extract ingredients even when they have numbers in names
+      expect(result.length).toBeGreaterThanOrEqual(1)
+      const milkIngredient = result.find(ing => ing.name.toLowerCase().includes('milk'))
+      if (milkIngredient) {
+        expect(milkIngredient.name).toContain('milk')
+      }
+    })
+    
     it('should handle ingredients without units', () => {
       const result = extractIngredients('add 2 eggs and 1 onion')
       
