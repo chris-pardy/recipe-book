@@ -13,11 +13,17 @@ export interface RecipeBookDB extends DBSchema {
       uri: string
       cid?: string
       indexedAt: string
+      // Optional: undefined means not pending sync, false means explicitly not pending,
+      // true means pending sync. This allows for efficient filtering without requiring
+      // all records to have the field set.
+      pendingSync?: boolean
+      lastModified?: string
     }
     indexes: {
       'by-title': string
       'by-createdAt': string
       'by-updatedAt': string
+      'by-pendingSync': boolean
     }
   }
   collections: {
@@ -39,40 +45,109 @@ export interface RecipeBookDB extends DBSchema {
       lastCursor?: string
     }
   }
+  pendingSyncQueue: {
+    key: string // recipe URI
+    value: {
+      uri: string
+      operation: 'create' | 'update' | 'delete'
+      timestamp: string
+      data?: Recipe
+    }
+    indexes: {
+      'by-timestamp': string
+    }
+  }
 }
 
 const DB_NAME = 'recipe-book'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 /**
- * Initialize the IndexedDB database
+ * Custom error class for IndexedDB operations
+ */
+export class IndexedDBError extends Error {
+  constructor(
+    message: string,
+    public operation: string,
+    public originalError?: unknown,
+  ) {
+    super(message)
+    this.name = 'IndexedDBError'
+  }
+}
+
+/**
+ * Initialize the IndexedDB database with migration support
  */
 export async function initDB(): Promise<IDBPDatabase<RecipeBookDB>> {
-  return openDB<RecipeBookDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      // Recipes store
-      if (!db.objectStoreNames.contains('recipes')) {
-        const recipeStore = db.createObjectStore('recipes', { keyPath: 'uri' })
-        recipeStore.createIndex('by-title', 'title')
-        recipeStore.createIndex('by-createdAt', 'createdAt')
-        recipeStore.createIndex('by-updatedAt', 'updatedAt')
-      }
+  try {
+    return await openDB<RecipeBookDB>(DB_NAME, DB_VERSION, {
+      async upgrade(db, oldVersion, newVersion) {
+        // Initial schema creation (version 1)
+        if (oldVersion === 0) {
+          // Recipes store
+          const recipeStore = db.createObjectStore('recipes', { keyPath: 'uri' })
+          recipeStore.createIndex('by-title', 'title')
+          recipeStore.createIndex('by-createdAt', 'createdAt')
+          recipeStore.createIndex('by-updatedAt', 'updatedAt')
+          recipeStore.createIndex('by-pendingSync', 'pendingSync')
 
-      // Collections store
-      if (!db.objectStoreNames.contains('collections')) {
-        const collectionStore = db.createObjectStore('collections', {
-          keyPath: 'uri',
-        })
-        collectionStore.createIndex('by-name', 'name')
-        collectionStore.createIndex('by-createdAt', 'createdAt')
-      }
+          // Collections store
+          const collectionStore = db.createObjectStore('collections', {
+            keyPath: 'uri',
+          })
+          collectionStore.createIndex('by-name', 'name')
+          collectionStore.createIndex('by-createdAt', 'createdAt')
 
-      // Sync state store
-      if (!db.objectStoreNames.contains('syncState')) {
-        db.createObjectStore('syncState')
-      }
-    },
-  })
+          // Sync state store
+          db.createObjectStore('syncState')
+
+          // Pending sync queue store
+          const queueStore = db.createObjectStore('pendingSyncQueue', {
+            keyPath: 'uri',
+          })
+          queueStore.createIndex('by-timestamp', 'timestamp')
+        }
+
+        // Migration from version 1 to 2
+        if (oldVersion < 2 && oldVersion > 0) {
+          // Add pendingSync index to recipes if it doesn't exist
+          if (db.objectStoreNames.contains('recipes')) {
+            const tx = db.transaction('recipes', 'readwrite')
+            const recipeStore = tx.store
+            try {
+              if (!recipeStore.indexNames.contains('by-pendingSync')) {
+                recipeStore.createIndex('by-pendingSync', 'pendingSync')
+              }
+            } catch (e) {
+              // Index might already exist - only ignore expected errors
+              // Check if it's a ConstraintError (index already exists)
+              if (e instanceof Error && e.name !== 'ConstraintError') {
+                // Re-throw unexpected errors
+                throw e
+              }
+              // Index already exists, which is fine - ignore
+            }
+            await tx.done
+          }
+
+          // Create pending sync queue store
+          if (!db.objectStoreNames.contains('pendingSyncQueue')) {
+            const queueStore = db.createObjectStore('pendingSyncQueue', {
+              keyPath: 'uri',
+            })
+            queueStore.createIndex('by-timestamp', 'timestamp')
+          }
+        }
+      },
+    })
+  } catch (error) {
+    throw new IndexedDBError(
+      `Failed to initialize database: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'initDB',
+      error,
+    )
+  }
 }
 
 /**
@@ -95,60 +170,231 @@ export function resetDB(): void {
 }
 
 /**
- * Recipe operations
+ * Recipe operations with error handling
  */
 export const recipeDB = {
   async get(uri: string): Promise<(Recipe & { uri: string }) | undefined> {
-    const db = await getDB()
-    return db.get('recipes', uri)
+    try {
+      const db = await getDB()
+      return await db.get('recipes', uri)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get recipe: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.get',
+        error,
+      )
+    }
   },
 
   async getAll(): Promise<(Recipe & { uri: string })[]> {
-    const db = await getDB()
-    return db.getAll('recipes')
+    try {
+      const db = await getDB()
+      return await db.getAll('recipes')
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get all recipes: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.getAll',
+        error,
+      )
+    }
   },
 
   async put(
     uri: string,
     recipe: Recipe,
     cid?: string,
+    pendingSync = false,
   ): Promise<void> {
-    const db = await getDB()
-    await db.put('recipes', {
-      ...recipe,
-      uri,
-      cid,
-      indexedAt: new Date().toISOString(),
-    })
+    try {
+      const db = await getDB()
+      const now = new Date().toISOString()
+      await db.put('recipes', {
+        ...recipe,
+        uri,
+        cid,
+        indexedAt: now,
+        pendingSync,
+        lastModified: now,
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to put recipe: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.put',
+        error,
+      )
+    }
+  },
+
+  /**
+   * Update an existing recipe
+   * 
+   * @param uri - The URI of the recipe to update
+   * @param updates - Partial recipe data to update
+   * @param pendingSync - Whether the recipe needs to be synced (default: false)
+   * @throws {IndexedDBError} If the recipe doesn't exist or update fails
+   */
+  async update(
+    uri: string,
+    updates: Partial<Recipe>,
+    pendingSync = false,
+  ): Promise<void> {
+    try {
+      const db = await getDB()
+      const existing = await db.get('recipes', uri)
+      if (!existing) {
+        throw new Error(`Recipe with URI ${uri} not found`)
+      }
+      const now = new Date().toISOString()
+      await db.put('recipes', {
+        ...existing,
+        ...updates,
+        uri,
+        pendingSync,
+        lastModified: now,
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to update recipe: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.update',
+        error,
+      )
+    }
   },
 
   async delete(uri: string): Promise<void> {
-    const db = await getDB()
-    await db.delete('recipes', uri)
+    try {
+      const db = await getDB()
+      await db.delete('recipes', uri)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to delete recipe: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.delete',
+        error,
+      )
+    }
   },
 
   async searchByTitle(query: string): Promise<(Recipe & { uri: string })[]> {
-    const db = await getDB()
-    const allRecipes = await db.getAll('recipes')
-    const lowerQuery = query.toLowerCase()
-    return allRecipes.filter((recipe) =>
-      recipe.title.toLowerCase().includes(lowerQuery),
-    )
+    try {
+      const db = await getDB()
+      const allRecipes = await db.getAll('recipes')
+      const lowerQuery = query.toLowerCase()
+      return allRecipes.filter((recipe) =>
+        recipe.title.toLowerCase().includes(lowerQuery),
+      )
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to search recipes by title: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.searchByTitle',
+        error,
+      )
+    }
+  },
+
+  /**
+   * Get all recipes in a collection
+   * 
+   * @param collectionUri - The URI of the collection
+   * @returns Array of recipes in the collection
+   * 
+   * @todo Consider optimizing for large datasets by using IndexedDB indexes
+   * instead of loading all recipes into memory and filtering in JavaScript
+   */
+  async getByCollection(
+    collectionUri: string,
+  ): Promise<(Recipe & { uri: string })[]> {
+    try {
+      const db = await getDB()
+      const collection = await db.get('collections', collectionUri)
+      if (!collection) {
+        return []
+      }
+      // TODO: Optimize for large datasets - consider using IndexedDB indexes
+      // or a more efficient query pattern instead of loading all recipes
+      const allRecipes = await db.getAll('recipes')
+      return allRecipes.filter((recipe) =>
+        collection.recipeUris.includes(recipe.uri),
+      )
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get recipes by collection: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.getByCollection',
+        error,
+      )
+    }
+  },
+
+  /**
+   * Mark a recipe as pending sync or clear the pending sync flag
+   * 
+   * @param uri - The URI of the recipe
+   * @param pending - Whether the recipe is pending sync (default: true)
+   * @throws {IndexedDBError} If the recipe doesn't exist or operation fails
+   */
+  async markPendingSync(uri: string, pending = true): Promise<void> {
+    try {
+      const db = await getDB()
+      const recipe = await db.get('recipes', uri)
+      if (!recipe) {
+        throw new Error(`Recipe with URI ${uri} not found`)
+      }
+      await db.put('recipes', {
+        ...recipe,
+        pendingSync: pending,
+        lastModified: new Date().toISOString(),
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to mark recipe as pending sync: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.markPendingSync',
+        error,
+      )
+    }
+  },
+
+  async getPendingSync(): Promise<(Recipe & { uri: string })[]> {
+    try {
+      const db = await getDB()
+      const allRecipes = await db.getAll('recipes')
+      return allRecipes.filter((recipe) => recipe.pendingSync === true)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get pending sync recipes: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'recipeDB.getPendingSync',
+        error,
+      )
+    }
   },
 }
 
 /**
- * Collection operations
+ * Collection operations with error handling
  */
 export const collectionDB = {
   async get(uri: string): Promise<(Collection & { uri: string }) | undefined> {
-    const db = await getDB()
-    return db.get('collections', uri)
+    try {
+      const db = await getDB()
+      return await db.get('collections', uri)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get collection: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'collectionDB.get',
+        error,
+      )
+    }
   },
 
   async getAll(): Promise<(Collection & { uri: string })[]> {
-    const db = await getDB()
-    return db.getAll('collections')
+    try {
+      const db = await getDB()
+      return await db.getAll('collections')
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get all collections: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'collectionDB.getAll',
+        error,
+      )
+    }
   },
 
   async put(
@@ -156,36 +402,144 @@ export const collectionDB = {
     collection: Collection,
     cid?: string,
   ): Promise<void> {
-    const db = await getDB()
-    await db.put('collections', {
-      ...collection,
-      uri,
-      cid,
-      indexedAt: new Date().toISOString(),
-    })
+    try {
+      const db = await getDB()
+      await db.put('collections', {
+        ...collection,
+        uri,
+        cid,
+        indexedAt: new Date().toISOString(),
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to put collection: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'collectionDB.put',
+        error,
+      )
+    }
   },
 
   async delete(uri: string): Promise<void> {
-    const db = await getDB()
-    await db.delete('collections', uri)
+    try {
+      const db = await getDB()
+      await db.delete('collections', uri)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to delete collection: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'collectionDB.delete',
+        error,
+      )
+    }
   },
 }
 
 /**
- * Sync state operations
+ * Sync state operations with error handling
  */
 export const syncStateDB = {
   async getLastSync(): Promise<string | null> {
-    const db = await getDB()
-    const state = await db.get('syncState', 'lastSync')
-    return state?.lastSyncAt || null
+    try {
+      const db = await getDB()
+      const state = await db.get('syncState', 'lastSync')
+      return state?.lastSyncAt || null
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get last sync: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'syncStateDB.getLastSync',
+        error,
+      )
+    }
   },
 
   async setLastSync(cursor?: string): Promise<void> {
-    const db = await getDB()
-    await db.put('syncState', 'lastSync', {
-      lastSyncAt: new Date().toISOString(),
-      lastCursor: cursor,
-    })
+    try {
+      const db = await getDB()
+      await db.put('syncState', 'lastSync', {
+        lastSyncAt: new Date().toISOString(),
+        lastCursor: cursor,
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to set last sync: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'syncStateDB.setLastSync',
+        error,
+      )
+    }
+  },
+}
+
+/**
+ * Pending sync queue operations with error handling
+ */
+export const pendingSyncQueue = {
+  async add(
+    uri: string,
+    operation: 'create' | 'update' | 'delete',
+    data?: Recipe,
+  ): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.put('pendingSyncQueue', {
+        uri,
+        operation,
+        timestamp: new Date().toISOString(),
+        data,
+      })
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to add to pending sync queue: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'pendingSyncQueue.add',
+        error,
+      )
+    }
+  },
+
+  async getAll(): Promise<
+    Array<{
+      uri: string
+      operation: 'create' | 'update' | 'delete'
+      timestamp: string
+      data?: Recipe
+    }>
+  > {
+    try {
+      const db = await getDB()
+      return await db.getAll('pendingSyncQueue')
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to get pending sync queue: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'pendingSyncQueue.getAll',
+        error,
+      )
+    }
+  },
+
+  async remove(uri: string): Promise<void> {
+    try {
+      const db = await getDB()
+      await db.delete('pendingSyncQueue', uri)
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to remove from pending sync queue: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'pendingSyncQueue.remove',
+        error,
+      )
+    }
+  },
+
+  async clear(): Promise<void> {
+    try {
+      const db = await getDB()
+      const tx = db.transaction('pendingSyncQueue', 'readwrite')
+      const store = tx.objectStore('pendingSyncQueue')
+      await store.clear()
+      await tx.done
+    } catch (error) {
+      throw new IndexedDBError(
+        `Failed to clear pending sync queue: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'pendingSyncQueue.clear',
+        error,
+      )
+    }
   },
 }
