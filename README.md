@@ -1,3 +1,45 @@
+# Recipe Book
+
+A React application for managing recipes with Bluesky OAuth authentication.
+
+## Authentication Setup
+
+This application uses Bluesky OAuth for authentication via the `@atproto/oauth-client-browser` library.
+
+### Client Metadata Configuration
+
+The OAuth client requires a `client-metadata.json` file that must be accessible at the root of your application. For production deployments, you should:
+
+1. **Update `public/client-metadata.json`** with your production URLs:
+   - Update `client_id` to your production client metadata URL
+   - Update `client_uri` to your production domain
+   - Update `redirect_uris` to your production callback URLs
+
+2. **Or use environment variables**:
+   - Set `VITE_CLIENT_METADATA_URL` to your production client metadata URL
+   - The app will use this instead of the origin-based URL
+
+### OAuth Flow
+
+The application uses the **authorization code flow**:
+1. User enters their Bluesky handle (e.g., `username.bsky.social`)
+2. User is redirected to Bluesky for authorization
+3. Bluesky redirects back with an authorization code
+4. The app exchanges the code for an access token
+5. Session is stored and persisted
+
+### Session Management
+
+- OAuth sessions are managed by the `@atproto/oauth-client-browser` library's internal storage
+- A reference to the session (DID and handle) is stored in `localStorage` for quick access
+- Both storage mechanisms must be in sync for proper session management
+
+### Development
+
+For local development, the default `client-metadata.json` uses `http://localhost:5173`. Make sure your Vite dev server matches this port.
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

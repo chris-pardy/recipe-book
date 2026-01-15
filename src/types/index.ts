@@ -5,3 +5,4 @@
 export * from './recipe'
 export * from './collection'
 export * from './atproto'
+export * from './auth'
