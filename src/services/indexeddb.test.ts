@@ -58,7 +58,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await initDB()
 
@@ -87,7 +87,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockImplementation((name, version, options) => {
+      ;(openDB as any).mockImplementation((name: any, version: any, options: any) => {
         if (options?.upgrade) {
           options.upgrade(mockDB as any, 1, 2)
         }
@@ -101,7 +101,7 @@ describe('IndexedDB Service', () => {
 
     it('should throw IndexedDBError on initialization failure', async () => {
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockRejectedValue(new Error('Database error'))
+      ;(openDB as any).mockRejectedValue(new Error('Database error'))
 
       await expect(initDB()).rejects.toThrow(IndexedDBError)
       await expect(initDB()).rejects.toThrow('Failed to initialize database')
@@ -134,7 +134,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const result = await recipeDB.get('at://did:plc:123/dev.chrispardy.recipes/1')
 
@@ -166,7 +166,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await recipeDB.put('at://did:plc:123/dev.chrispardy.recipes/1', recipe, 'cid123')
 
@@ -199,7 +199,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await recipeDB.delete('at://did:plc:123/dev.chrispardy.recipes/1')
 
@@ -243,7 +243,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const results = await recipeDB.searchByTitle('chocolate')
 
@@ -278,7 +278,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await recipeDB.update('at://did:plc:123/dev.chrispardy.recipes/1', {
         title: 'Updated Recipe',
@@ -311,7 +311,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(
         recipeDB.update('at://did:plc:123/dev.chrispardy.recipes/1', {
@@ -383,7 +383,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const results = await recipeDB.getByCollection(collectionUri)
 
@@ -410,7 +410,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const results = await recipeDB.getByCollection(
         'at://did:plc:123/dev.chrispardy.collections/999',
@@ -446,7 +446,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await recipeDB.markPendingSync('at://did:plc:123/dev.chrispardy.recipes/1', true)
 
@@ -476,7 +476,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(
         recipeDB.markPendingSync('at://did:plc:123/dev.chrispardy.recipes/1', true),
@@ -532,7 +532,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const results = await recipeDB.getPendingSync()
 
@@ -556,7 +556,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(recipeDB.get('test-uri')).rejects.toThrow(IndexedDBError)
     })
@@ -592,7 +592,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const result = await collectionDB.get('at://did:plc:123/dev.chrispardy.collections/1')
 
@@ -622,7 +622,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await collectionDB.put('at://did:plc:123/dev.chrispardy.collections/1', collection, 'cid123')
 
@@ -653,7 +653,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(collectionDB.get('test-uri')).rejects.toThrow(IndexedDBError)
     })
@@ -686,7 +686,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const result = await syncStateDB.getLastSync()
 
@@ -699,7 +699,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const result = await syncStateDB.getLastSync()
 
@@ -722,7 +722,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await syncStateDB.setLastSync('cursor123')
 
@@ -752,7 +752,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(syncStateDB.getLastSync()).rejects.toThrow(IndexedDBError)
     })
@@ -784,7 +784,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await pendingSyncQueue.add(
         'at://did:plc:123/dev.chrispardy.recipes/1',
@@ -840,7 +840,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       const results = await pendingSyncQueue.getAll()
 
@@ -863,7 +863,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await pendingSyncQueue.remove('at://did:plc:123/dev.chrispardy.recipes/1')
 
@@ -897,7 +897,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await pendingSyncQueue.clear()
 
@@ -920,7 +920,7 @@ describe('IndexedDB Service', () => {
       }
 
       const { openDB } = await import('idb')
-      vi.mocked(openDB).mockResolvedValue(mockDB as any)
+      ;(openDB as any).mockResolvedValue(mockDB as any)
 
       await expect(
         pendingSyncQueue.add('test-uri', 'create'),

@@ -13,6 +13,9 @@ export interface RecipeBookDB extends DBSchema {
       uri: string
       cid?: string
       indexedAt: string
+      // Optional: undefined means not pending sync, false means explicitly not pending,
+      // true means pending sync. This allows for efficient filtering without requiring
+      // all records to have the field set.
       pendingSync?: boolean
       lastModified?: string
     }
@@ -117,7 +120,13 @@ export async function initDB(): Promise<IDBPDatabase<RecipeBookDB>> {
                 recipeStore.createIndex('by-pendingSync', 'pendingSync')
               }
             } catch (e) {
-              // Index might already exist, ignore
+              // Index might already exist - only ignore expected errors
+              // Check if it's a ConstraintError (index already exists)
+              if (e instanceof Error && e.name !== 'ConstraintError') {
+                // Re-throw unexpected errors
+                throw e
+              }
+              // Index already exists, which is fine - ignore
             }
             await tx.done
           }
@@ -216,6 +225,14 @@ export const recipeDB = {
     }
   },
 
+  /**
+   * Update an existing recipe
+   * 
+   * @param uri - The URI of the recipe to update
+   * @param updates - Partial recipe data to update
+   * @param pendingSync - Whether the recipe needs to be synced (default: false)
+   * @throws {IndexedDBError} If the recipe doesn't exist or update fails
+   */
   async update(
     uri: string,
     updates: Partial<Recipe>,
@@ -274,6 +291,15 @@ export const recipeDB = {
     }
   },
 
+  /**
+   * Get all recipes in a collection
+   * 
+   * @param collectionUri - The URI of the collection
+   * @returns Array of recipes in the collection
+   * 
+   * @todo Consider optimizing for large datasets by using IndexedDB indexes
+   * instead of loading all recipes into memory and filtering in JavaScript
+   */
   async getByCollection(
     collectionUri: string,
   ): Promise<(Recipe & { uri: string })[]> {
@@ -283,6 +309,8 @@ export const recipeDB = {
       if (!collection) {
         return []
       }
+      // TODO: Optimize for large datasets - consider using IndexedDB indexes
+      // or a more efficient query pattern instead of loading all recipes
       const allRecipes = await db.getAll('recipes')
       return allRecipes.filter((recipe) =>
         collection.recipeUris.includes(recipe.uri),
@@ -296,6 +324,13 @@ export const recipeDB = {
     }
   },
 
+  /**
+   * Mark a recipe as pending sync or clear the pending sync flag
+   * 
+   * @param uri - The URI of the recipe
+   * @param pending - Whether the recipe is pending sync (default: true)
+   * @throws {IndexedDBError} If the recipe doesn't exist or operation fails
+   */
   async markPendingSync(uri: string, pending = true): Promise<void> {
     try {
       const db = await getDB()
