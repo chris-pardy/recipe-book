@@ -1,0 +1,16 @@
+# Cursor Rules for Recipe Book Project
+
+## Package Manager
+- Always use `bun` instead of `npm` or `yarn` for package management
+- Use `bun install` instead of `npm install`
+- Use `bun add <package>` instead of `npm install <package>`
+- Use `bun add -d <package>` instead of `npm install --save-dev <package>`
+- Use `bun run <script>` instead of `npm run <script>`
+- Use `bunx` instead of `npx` for running packages
+
+## Project Context
+- This is a React + TypeScript + Vite project
+- Uses Vitest for testing
+- Uses Tailwind CSS and shadcn/ui for UI
+- Uses @atproto/api for Bluesky/ATProto integration
+- Uses IndexedDB for local caching
