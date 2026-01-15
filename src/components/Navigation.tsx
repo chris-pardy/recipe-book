@@ -6,6 +6,7 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { UserMenu } from './UserMenu'
+import { SyncStatusIndicator } from './SyncStatusIndicator'
 import { Button } from './ui/button'
 
 export function Navigation() {
@@ -40,6 +41,7 @@ export function Navigation() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            {isAuthenticated && <SyncStatusIndicator />}
             {isAuthenticated ? (
               <UserMenu />
             ) : (

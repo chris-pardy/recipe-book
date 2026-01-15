@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './hooks/AuthProvider'
+import { SyncProvider } from './hooks/useSync'
 import { initDB } from './services/indexeddb'
 
 // Initialize IndexedDB on app start
@@ -16,7 +17,9 @@ initDB().catch((error) => {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>
-      <App />
+      <SyncProvider>
+        <App />
+      </SyncProvider>
     </AuthProvider>
   </StrictMode>,
 )
