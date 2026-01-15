@@ -67,7 +67,7 @@ function addToAggregated(
   
   // Find existing entry with same unit system
   const existingEntry = aggregated.entries.find(
-    entry => entry.system === system && areSameSystem(entry.unit, extracted.unit)
+    entry => entry.system === system
   )
   
   if (existingEntry) {
@@ -110,6 +110,10 @@ function addToAggregated(
 
 /**
  * Normalize all entries in an aggregated ingredient to preferred units
+ * 
+ * Note: This function mutates the input by updating the entries array.
+ * This is intentional for performance reasons, as normalization is typically
+ * called during aggregation and the original data is no longer needed.
  */
 function normalizeAggregatedIngredient(aggregated: AggregatedIngredient): void {
   aggregated.entries = aggregated.entries.map(entry => {

@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
 import { aggregateIngredients as aggregateIngredientsUtil, aggregatedToRecipeIngredients } from '../utils/ingredientAggregation'
+import { getUnitSystem } from '../utils/unitConversion'
 import { createRecipe, updateRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
@@ -157,12 +158,10 @@ function aggregateIngredients(
   
   // Merge manual ingredients with extracted ones
   const result: AggregatedIngredient[] = []
-  const processedKeys = new Set<string>()
   
   // Add form ingredients (from extraction)
   for (const formIng of formIngredients) {
     const key = formIng.name.toLowerCase()
-    processedKeys.add(key)
     
     const manualList = manualMap.get(key)
     if (manualList && manualList.length > 0) {
@@ -482,14 +481,29 @@ export function RecipeCreationForm({
           const extracted = extractIngredients(step.text)
           const ingredientReferences = extracted.map(extractedIng => {
             // Find the aggregated ingredient this belongs to
-            // Match by name and unit to handle multiple unit systems correctly
-            const aggregated = aggregatedIngredients.find(
-              agg => agg.name.toLowerCase() === extractedIng.name.toLowerCase() &&
-                     agg.unit === extractedIng.unit
-            ) || aggregatedIngredients.find(
-              // Fallback: match by name only if no unit match
+            // Prefer exact match (name + unit) to handle multiple unit systems correctly
+            const nameMatches = aggregatedIngredients.filter(
               agg => agg.name.toLowerCase() === extractedIng.name.toLowerCase()
             )
+            
+            // Try exact match first (name + unit)
+            let aggregated = nameMatches.find(
+              agg => agg.unit === extractedIng.unit
+            )
+            
+            // If no exact match and multiple name matches exist, prefer same unit system
+            if (!aggregated && nameMatches.length > 1 && extractedIng.unit) {
+              const extractedSystem = getUnitSystem(extractedIng.unit)
+              aggregated = nameMatches.find(agg => {
+                if (!agg.unit) return false
+                return getUnitSystem(agg.unit) === extractedSystem
+              })
+            }
+            
+            // Fallback: use first name match only if there's exactly one
+            if (!aggregated && nameMatches.length === 1) {
+              aggregated = nameMatches[0]
+            }
             
             if (!aggregated) return null
             
