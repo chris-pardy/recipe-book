@@ -5,3 +5,5 @@
 export * from './atproto'
 export * from './indexeddb'
 export * from './auth'
+export * from './agent'
+export * from './recipeDeletion'

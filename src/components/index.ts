@@ -5,3 +5,5 @@
 export * from './Login'
 export * from './ProtectedRoute'
 export * from './UserMenu'
+export * from './DeleteRecipeDialog'
+export * from './RecipeView'
