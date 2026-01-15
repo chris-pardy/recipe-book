@@ -51,6 +51,7 @@ export class FirehoseSyncService {
   private reconnectDelay = 1000
   private isPaused = false
   private userDid: string | null = null
+  private lastError: string | null = null
 
   /**
    * Initialize the sync service
@@ -83,8 +84,9 @@ export class FirehoseSyncService {
 
       await this.connect()
     } catch (error) {
-      this.setStatus('error')
       const errorMessage = error instanceof Error ? error.message : 'Failed to start sync'
+      this.lastError = errorMessage
+      this.setStatus('error')
       this.callbacks.onError?.(new Error(errorMessage))
       throw error
     }
@@ -101,6 +103,7 @@ export class FirehoseSyncService {
     this.currentSignal = null
     this.agent = null
     this.userDid = null
+    this.lastError = null
     this.setStatus('idle')
   }
 
@@ -152,7 +155,7 @@ export class FirehoseSyncService {
     return {
       status: this.status,
       lastSyncAt,
-      error: this.status === 'error' ? 'Sync error occurred' : null,
+      error: this.status === 'error' ? this.lastError : null,
       pendingSyncCount: pendingRecipes.length,
     }
   }
@@ -207,8 +210,9 @@ export class FirehoseSyncService {
         await this.sleep(delay)
         await this.connect()
       } else {
-        this.setStatus('error')
         const errorMessage = error instanceof Error ? error.message : 'Connection failed'
+        this.lastError = errorMessage
+        this.setStatus('error')
         this.callbacks.onError?.(new Error(errorMessage))
       }
     }
@@ -229,6 +233,7 @@ export class FirehoseSyncService {
       ) {
         const commitEvent = event as {
           repo?: string
+          seq?: number
           ops?: Array<{
             action: string
             path: string
@@ -259,9 +264,10 @@ export class FirehoseSyncService {
           await this.handleOperation(op, commitEvent.time)
         }
 
-        // Update last sync timestamp
+        // Update last sync timestamp and cursor
         if (commitEvent.time) {
-          await syncStateDB.setLastSync()
+          const cursor = commitEvent.seq?.toString()
+          await syncStateDB.setLastSync(cursor)
         }
 
         this.setStatus('connected')
