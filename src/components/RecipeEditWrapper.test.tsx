@@ -8,6 +8,7 @@ import { getAuthenticatedAgent } from '../services/agent'
 import { getRecipe } from '../services/atproto'
 import { recipeDB } from '../services/indexeddb'
 import { isRecipeOwned } from '../utils/recipeOwnership'
+import { isRecipeForked } from '../utils/recipeForking'
 import type { Recipe } from '../types/recipe'
 
 // Mock dependencies
@@ -32,6 +33,10 @@ vi.mock('../services/indexeddb', () => ({
 
 vi.mock('../utils/recipeOwnership', () => ({
   isRecipeOwned: vi.fn(),
+}))
+
+vi.mock('../utils/recipeForking', () => ({
+  isRecipeForked: vi.fn(),
 }))
 
 // Mock RecipeCreationForm to avoid complex setup
@@ -89,6 +94,7 @@ describe('RecipeEditWrapper', () => {
       handleCallback: vi.fn(),
     })
     ;(isRecipeOwned as any).mockReturnValue(true)
+    ;(isRecipeForked as any).mockReturnValue(false)
   })
 
   it('should load recipe from cache and display edit form', async () => {
@@ -222,6 +228,68 @@ describe('RecipeEditWrapper', () => {
     await waitFor(() => {
       // Should show error since URI is invalid
       expect(screen.queryByText('Edit Recipe')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('fork prevention', () => {
+    const forkedRecipe: Recipe & { uri: string; forkMetadata?: any } = {
+      ...mockRecipe,
+      forkMetadata: {
+        originalRecipeUri: 'at://did:plc:original123/dev.chrispardy.recipes/original',
+        originalAuthorDid: 'did:plc:original123',
+        forkedAt: '2024-01-01T00:00:00Z',
+      },
+    }
+
+    it('should prevent editing forked recipes loaded from cache', async () => {
+      ;(recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      ;(isRecipeForked as any).mockReturnValue(true)
+
+      render(<RecipeEditWrapper />, {
+        wrapper: createWrapper(`/recipe/${encodeURIComponent(mockRecipe.uri)}/edit`),
+      })
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/forked recipes cannot be edited/i),
+        ).toBeInTheDocument()
+      })
+    })
+
+    it('should prevent editing forked recipes even if owned', async () => {
+      ;(recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      ;(isRecipeOwned as any).mockReturnValue(true)
+      ;(isRecipeForked as any).mockReturnValue(true)
+
+      render(<RecipeEditWrapper />, {
+        wrapper: createWrapper(`/recipe/${encodeURIComponent(mockRecipe.uri)}/edit`),
+      })
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/forked recipes cannot be edited/i),
+        ).toBeInTheDocument()
+      })
+    })
+
+    it('should check for fork status when loading from PDS', async () => {
+      const mockAgent = {} as any
+      ;(recipeDB.get as any)
+        .mockResolvedValueOnce(undefined) // Not in cache
+        .mockResolvedValueOnce(forkedRecipe) // Check cache again for fork status
+      ;(getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+      ;(getRecipe as any).mockResolvedValue(mockRecipe)
+      ;(isRecipeForked as any).mockReturnValue(true)
+
+      render(<RecipeEditWrapper />, {
+        wrapper: createWrapper(`/recipe/${encodeURIComponent(mockRecipe.uri)}/edit`),
+      })
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/forked recipes cannot be edited/i),
+        ).toBeInTheDocument()
+      })
     })
   })
 })

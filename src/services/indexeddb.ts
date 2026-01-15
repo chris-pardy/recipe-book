@@ -4,7 +4,7 @@
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb'
-import type { Recipe, Collection } from '../types'
+import type { Recipe, Collection, ForkMetadata } from '../types'
 
 export interface RecipeBookDB extends DBSchema {
   recipes: {
@@ -18,6 +18,8 @@ export interface RecipeBookDB extends DBSchema {
       // all records to have the field set.
       pendingSync?: boolean
       lastModified?: string
+      // Fork metadata for recipes that are copies of recipes owned by other users
+      forkMetadata?: ForkMetadata
     }
     indexes: {
       'by-title': string
@@ -60,7 +62,7 @@ export interface RecipeBookDB extends DBSchema {
 }
 
 const DB_NAME = 'recipe-book'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 /**
  * Custom error class for IndexedDB operations
@@ -139,6 +141,14 @@ export async function initDB(): Promise<IDBPDatabase<RecipeBookDB>> {
             queueStore.createIndex('by-timestamp', 'timestamp')
           }
         }
+
+        // Migration from version 2 to 3
+        // Add support for fork metadata (no schema changes needed, forkMetadata is optional)
+        // Existing recipes will continue to work without forkMetadata
+        if (oldVersion < 3 && oldVersion > 0) {
+          // No schema changes required - forkMetadata is an optional field
+          // Existing recipes will simply not have forkMetadata, which is fine
+        }
       },
     })
   } catch (error) {
@@ -204,6 +214,7 @@ export const recipeDB = {
     recipe: Recipe,
     cid?: string,
     pendingSync = false,
+    forkMetadata?: ForkMetadata,
   ): Promise<void> {
     try {
       const db = await getDB()
@@ -215,6 +226,7 @@ export const recipeDB = {
         indexedAt: now,
         pendingSync,
         lastModified: now,
+        forkMetadata,
       })
     } catch (error) {
       throw new IndexedDBError(

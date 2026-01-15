@@ -6,9 +6,11 @@ import { RecipeView } from './RecipeView'
 import { useAuth } from '../hooks/useAuth'
 import { getAuthenticatedAgent } from '../services/agent'
 import { getRecipe } from '../services/atproto'
-import { recipeDB } from '../services/indexeddb'
+import { recipeDB, collectionDB } from '../services/indexeddb'
 import { deleteRecipeComplete } from '../services/recipeDeletion'
 import { isRecipeOwned } from '../utils/recipeOwnership'
+import { ensureRecipeInDefaultCollection, getCollectionsForRecipe } from '../services/collections'
+import { updateCollection } from '../services/atproto'
 import type { Recipe } from '../types/recipe'
 
 // Mock dependencies
@@ -22,11 +24,17 @@ vi.mock('../services/agent', () => ({
 
 vi.mock('../services/atproto', () => ({
   getRecipe: vi.fn(),
+  updateCollection: vi.fn(),
 }))
 
 vi.mock('../services/indexeddb', () => ({
   recipeDB: {
     get: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
+  },
+  collectionDB: {
+    getAll: vi.fn(),
     put: vi.fn(),
   },
 }))
@@ -37,6 +45,21 @@ vi.mock('../services/recipeDeletion', () => ({
 
 vi.mock('../utils/recipeOwnership', () => ({
   isRecipeOwned: vi.fn(),
+  getDidFromUri: vi.fn((uri: string) => {
+    if (!uri.startsWith('at://')) return null
+    const parts = uri.replace('at://', '').split('/')
+    return parts[0]?.startsWith('did:') ? parts[0] : null
+  }),
+}))
+
+vi.mock('../services/collections', () => ({
+  ensureRecipeInDefaultCollection: vi.fn(),
+  getCollectionsForRecipe: vi.fn(),
+}))
+
+vi.mock('../services/atproto', () => ({
+  getRecipe: vi.fn(),
+  updateCollection: vi.fn(),
 }))
 
 describe('RecipeView', () => {
@@ -133,6 +156,7 @@ describe('RecipeView', () => {
     vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
     vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
     vi.mocked(recipeDB.put).mockResolvedValue(undefined)
+    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -170,6 +194,8 @@ describe('RecipeView', () => {
     vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
     vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
     vi.mocked(recipeDB.put).mockResolvedValue(undefined)
+    vi.mocked(ensureRecipeInDefaultCollection).mockResolvedValue(undefined)
+    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -181,7 +207,6 @@ describe('RecipeView', () => {
     await user.click(addButton)
 
     await waitFor(() => {
-      expect(recipeDB.put).toHaveBeenCalledWith(mockRecipe.uri, { ...mockRecipe, uri: mockRecipe.uri })
       expect(screen.getByText(/recipe added to my recipes/i)).toBeInTheDocument()
     })
   })
@@ -199,6 +224,7 @@ describe('RecipeView', () => {
     vi.mocked(recipeDB.put)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('Failed to save'))
+    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -241,6 +267,7 @@ describe('RecipeView', () => {
     vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
     vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
     vi.mocked(recipeDB.put).mockResolvedValue(undefined)
+    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -372,8 +399,166 @@ describe('RecipeView', () => {
     expect(
       screen.getByText('at://did:plc:other123/dev.chrispardy.recipes/sub1'),
     ).toBeInTheDocument()
-    expect(
-      screen.getByText('at://did:plc:other123/dev.chrispardy.recipes/sub2'),
-    ).toBeInTheDocument()
+      expect(
+        screen.getByText('at://did:plc:other123/dev.chrispardy.recipes/sub2'),
+      ).toBeInTheDocument()
+  })
+
+  describe('fork functionality', () => {
+    const forkedRecipe: Recipe & { uri: string; forkMetadata?: any } = {
+      ...mockRecipe,
+      uri: 'at://did:plc:user123/dev.chrispardy.recipes/rkey123',
+      forkMetadata: {
+        originalRecipeUri: 'at://did:plc:original123/dev.chrispardy.recipes/original',
+        originalAuthorDid: 'did:plc:original123',
+        forkedAt: '2024-01-01T00:00:00Z',
+      },
+    }
+
+    it('should display fork indicator for forked recipes', async () => {
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+
+      render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/forked from/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should show unfork button for forked recipes', async () => {
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+
+      render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /unfork recipe/i })).toBeInTheDocument()
+      })
+    })
+
+    it('should create fork metadata when adding non-owned recipe to My Recipes', async () => {
+      const user = userEvent.setup()
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+      const mockAgent = {} as any
+      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+      vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
+      vi.mocked(recipeDB.put).mockResolvedValue(undefined)
+      vi.mocked(ensureRecipeInDefaultCollection).mockResolvedValue(undefined)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+
+      render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /add to my recipes/i })).toBeInTheDocument()
+      }, { timeout: 3000 })
+
+      const addButton = screen.getByRole('button', { name: /add to my recipes/i })
+      await user.click(addButton)
+
+      await waitFor(() => {
+        // Should be called with fork metadata
+        const putCalls = vi.mocked(recipeDB.put).mock.calls
+        const addToMyRecipesCall = putCalls.find(
+          (call) => call[0] === mockRecipe.uri && call.length === 5
+        )
+        expect(addToMyRecipesCall).toBeDefined()
+        expect(addToMyRecipesCall![4]).toMatchObject({
+          originalRecipeUri: mockRecipe.uri,
+          originalAuthorDid: 'did:plc:user123',
+          forkedAt: expect.any(String),
+        })
+      })
+    })
+
+    it('should unfork recipe when unfork button is clicked', async () => {
+      const user = userEvent.setup()
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      const mockAgent = {} as any
+      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+      vi.mocked(collectionDB.getAll).mockResolvedValue([])
+      vi.mocked(recipeDB.delete).mockResolvedValue(undefined)
+
+      render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /unfork recipe/i })).toBeInTheDocument()
+      })
+
+      const unforkButton = screen.getByRole('button', { name: /unfork recipe/i })
+      await user.click(unforkButton)
+
+      await waitFor(() => {
+        expect(recipeDB.delete).toHaveBeenCalledWith(forkedRecipe.uri)
+      })
+    })
+
+    it('should remove forked recipe from all collections when unforking', async () => {
+      const user = userEvent.setup()
+      const collection1 = {
+        uri: 'at://did:plc:user123/dev.chrispardy.collections/col1',
+        name: 'Collection 1',
+        recipeUris: [forkedRecipe.uri, 'at://did:plc:user123/dev.chrispardy.recipes/other'],
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      }
+      const collection2 = {
+        uri: 'at://did:plc:user123/dev.chrispardy.collections/col2',
+        name: 'Collection 2',
+        recipeUris: [forkedRecipe.uri],
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-01T00:00:00Z',
+      }
+
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      const mockAgent = {} as any
+      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
+      vi.mocked(collectionDB.getAll).mockResolvedValue([collection1, collection2])
+      vi.mocked(updateCollection).mockResolvedValue({ uri: collection1.uri, cid: 'cid1' })
+      vi.mocked(recipeDB.delete).mockResolvedValue(undefined)
+
+      render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /unfork recipe/i })).toBeInTheDocument()
+      })
+
+      const unforkButton = screen.getByRole('button', { name: /unfork recipe/i })
+      await user.click(unforkButton)
+
+      await waitFor(() => {
+        // Should update both collections
+        expect(updateCollection).toHaveBeenCalledWith(mockAgent, collection1.uri, {
+          recipeUris: ['at://did:plc:user123/dev.chrispardy.recipes/other'],
+        })
+        expect(updateCollection).toHaveBeenCalledWith(mockAgent, collection2.uri, {
+          recipeUris: [],
+        })
+        expect(recipeDB.delete).toHaveBeenCalledWith(forkedRecipe.uri)
+      })
+    })
+
+    it('should not show edit button for forked recipes', async () => {
+      vi.mocked(isRecipeOwned).mockReturnValue(false)
+      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
+      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+
+      render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      expect(
+        screen.queryByRole('button', { name: /edit recipe/i }),
+      ).not.toBeInTheDocument()
+    })
   })
 })
