@@ -12,8 +12,11 @@ import { extractIngredients, type ExtractedIngredient } from '../utils/ingredien
 import { createRecipe, updateRecipe } from '../services/atproto'
 import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
+import { collectionDB } from '../services/indexeddb'
+import { addRecipeToCollection, ensureRecipeInDefaultCollection } from '../services/collections'
 import { cn } from '../lib/utils'
 import type { Recipe, Ingredient, Step } from '../types/recipe'
+import type { Collection } from '../types/collection'
 
 export interface RecipeCreationFormProps {
   /** Callback when recipe is successfully created */
@@ -261,6 +264,8 @@ export function RecipeCreationForm({
   const [success, setSuccess] = useState(false)
   const successTimeoutRef = useRef<number | null>(null)
   const extractionTimeoutRef = useRef<number | null>(null)
+  const [collections, setCollections] = useState<(Collection & { uri: string })[]>([])
+  const [selectedCollectionUris, setSelectedCollectionUris] = useState<string[]>([])
   
   // Manual ingredient addition state
   const [showManualIngredient, setShowManualIngredient] = useState(false)
@@ -298,6 +303,21 @@ export function RecipeCreationForm({
     }, 300)
   }, [aggregatedIngredients])
   
+  // Load collections on mount
+  useEffect(() => {
+    async function loadCollections() {
+      if (!isAuthenticated) return
+      try {
+        const allCollections = await collectionDB.getAll()
+        setCollections(allCollections)
+      } catch (err) {
+        // Silently fail - collections are optional
+        console.error('Failed to load collections:', err)
+      }
+    }
+    loadCollections()
+  }, [isAuthenticated])
+
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
@@ -509,6 +529,19 @@ export function RecipeCreationForm({
           updatedAt: new Date().toISOString(),
         }
         await recipeDB.put(uri, recipe, cid, false)
+
+        // Add to default collection (auto-created if needed)
+        await ensureRecipeInDefaultCollection(uri)
+
+        // Add to selected collections
+        for (const collectionUri of selectedCollectionUris) {
+          try {
+            await addRecipeToCollection(agent, collectionUri, uri)
+          } catch (err) {
+            // Log but don't fail - collection addition is optional
+            console.error(`Failed to add recipe to collection ${collectionUri}:`, err)
+          }
+        }
       }
       
       setSuccess(true)
@@ -780,6 +813,48 @@ export function RecipeCreationForm({
           )}
         </div>
         
+        {/* Collections selection */}
+        {collections.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Add to Collections (optional)
+            </label>
+            <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-300 rounded-md p-3 bg-gray-50">
+              {collections.map((collection) => {
+                const isSelected = selectedCollectionUris.includes(collection.uri)
+                return (
+                  <label
+                    key={collection.uri}
+                    className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-2 rounded"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedCollectionUris((prev) => [...prev, collection.uri])
+                        } else {
+                          setSelectedCollectionUris((prev) =>
+                            prev.filter((uri) => uri !== collection.uri)
+                          )
+                        }
+                      }}
+                      disabled={isSubmitting}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-gray-700">{collection.name}</span>
+                    {collection.description && (
+                      <span className="text-xs text-gray-500">
+                        - {collection.description}
+                      </span>
+                    )}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Error message */}
         {error && (
           <div

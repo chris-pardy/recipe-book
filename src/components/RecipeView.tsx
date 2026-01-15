@@ -11,10 +11,14 @@ import { getAuthenticatedAgent } from '../services/agent'
 import { recipeDB } from '../services/indexeddb'
 import { deleteRecipeComplete } from '../services/recipeDeletion'
 import { isRecipeOwned } from '../utils/recipeOwnership'
+import { ensureRecipeInDefaultCollection } from '../services/collections'
+import { getCollectionsForRecipe } from '../services/collections'
 import { DeleteRecipeDialog } from './DeleteRecipeDialog'
+import { CollectionManagementDialog } from './CollectionManagementDialog'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import type { Recipe } from '../types/recipe'
+import type { Collection } from '../types/collection'
 
 export interface RecipeViewProps {
   /** The URI of the recipe to display */
@@ -38,6 +42,8 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [isAddingToMyRecipes, setIsAddingToMyRecipes] = useState(false)
   const [isAddedToMyRecipes, setIsAddedToMyRecipes] = useState(false)
   const [addToMyRecipesError, setAddToMyRecipesError] = useState<string | null>(null)
+  const [collections, setCollections] = useState<(Collection & { uri: string })[]>([])
+  const [showCollectionDialog, setShowCollectionDialog] = useState(false)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
 
@@ -82,6 +88,10 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
           setRecipe(recipeWithUri)
           // Cache the complete recipe with URI
           await recipeDB.put(recipeUri, recipeWithUri)
+          
+          // Load collections for this recipe
+          const recipeCollections = await getCollectionsForRecipe(recipeUri)
+          setCollections(recipeCollections)
         }
       } catch (err) {
         if (mounted) {
@@ -150,10 +160,16 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
 
     try {
       // Save recipe to IndexedDB (this adds it to the user's local collection)
-      // When collections are fully implemented (issue #12), this can be enhanced
-      // to add the recipe to a default "My Saved Recipes" collection
       // Ensure consistency by always including the URI
       await recipeDB.put(recipeUri, { ...recipe, uri: recipeUri })
+      
+      // Add to default collection
+      await ensureRecipeInDefaultCollection(recipeUri)
+      
+      // Reload collections
+      const recipeCollections = await getCollectionsForRecipe(recipeUri)
+      setCollections(recipeCollections)
+      
       setIsAddedToMyRecipes(true)
     } catch (err) {
       setAddToMyRecipesError(
@@ -162,6 +178,12 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
     } finally {
       setIsAddingToMyRecipes(false)
     }
+  }
+
+  const handleCollectionUpdate = async () => {
+    // Reload collections
+    const recipeCollections = await getCollectionsForRecipe(recipeUri)
+    setCollections(recipeCollections)
   }
 
 
@@ -293,6 +315,35 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
                 Recipe added to My Recipes
               </div>
             )}
+
+            {/* Collections */}
+            {collections.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-2">Collections</h3>
+                <div className="flex flex-wrap gap-2">
+                  {collections.map((collection) => (
+                    <span
+                      key={collection.uri}
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                    >
+                      {collection.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Collection management button */}
+            {isAuthenticated && (
+              <div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowCollectionDialog(true)}
+                >
+                  Manage Collections
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -303,6 +354,13 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         recipeTitle={recipe.title}
         onConfirm={handleDeleteConfirm}
         isLoading={isDeleting}
+      />
+
+      <CollectionManagementDialog
+        open={showCollectionDialog}
+        onOpenChange={setShowCollectionDialog}
+        recipeUri={recipeUri}
+        onUpdate={handleCollectionUpdate}
       />
     </div>
   )
