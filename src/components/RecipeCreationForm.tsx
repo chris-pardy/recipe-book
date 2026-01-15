@@ -5,7 +5,7 @@
  * automatic ingredient extraction, and manual ingredient addition.
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { extractIngredients, type ExtractedIngredient } from '../utils/ingredientExtraction'
 import { createRecipe } from '../services/atproto'
@@ -36,16 +36,30 @@ interface AggregatedIngredient {
 }
 
 /**
+ * Fuzzy match score constants
+ */
+const FUZZY_MATCH_SCORES = {
+  EXACT: 1.0,
+  TARGET_CONTAINS_QUERY: 0.8,
+  QUERY_CONTAINS_TARGET: 0.6,
+  MIN_THRESHOLD: 0.3,
+} as const
+
+/**
  * Simple fuzzy matching function for ingredient suggestions
  * Returns a score between 0 and 1, where 1 is an exact match
+ * 
+ * @param query - The search query string
+ * @param target - The target string to match against
+ * @returns A score between 0 and 1, where 1 is an exact match
  */
 function fuzzyMatch(query: string, target: string): number {
   const queryLower = query.toLowerCase().trim()
   const targetLower = target.toLowerCase().trim()
   
-  if (queryLower === targetLower) return 1
-  if (targetLower.includes(queryLower)) return 0.8
-  if (queryLower.includes(targetLower)) return 0.6
+  if (queryLower === targetLower) return FUZZY_MATCH_SCORES.EXACT
+  if (targetLower.includes(queryLower)) return FUZZY_MATCH_SCORES.TARGET_CONTAINS_QUERY
+  if (queryLower.includes(targetLower)) return FUZZY_MATCH_SCORES.QUERY_CONTAINS_TARGET
   
   // Simple Levenshtein-like scoring
   let matches = 0
@@ -57,7 +71,71 @@ function fuzzyMatch(query: string, target: string): number {
 }
 
 /**
+ * Helper function to safely generate UUIDs with fallback
+ * @returns A unique identifier string
+ */
+function generateUUID(): string {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID()
+    }
+  } catch (error) {
+    // Fallback for environments where crypto.randomUUID is not available
+  }
+  // Fallback UUID generation
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}-${Math.random().toString(36).substring(2, 9)}`
+}
+
+/**
+ * Determines if two ingredients should have their amounts combined
+ * @param existing - The existing aggregated ingredient
+ * @param extracted - The newly extracted ingredient
+ * @returns True if amounts should be combined
+ */
+function shouldCombineAmounts(
+  existing: AggregatedIngredient,
+  extracted: ExtractedIngredient
+): boolean {
+  return (
+    existing.unit === extracted.unit &&
+    existing.amount !== undefined &&
+    extracted.amount !== undefined
+  )
+}
+
+/**
+ * Updates an existing ingredient with data from an extracted ingredient
+ * @param existing - The existing aggregated ingredient to update
+ * @param extracted - The newly extracted ingredient
+ */
+function updateIngredientAmounts(
+  existing: AggregatedIngredient,
+  extracted: ExtractedIngredient
+): void {
+  if (shouldCombineAmounts(existing, extracted)) {
+    existing.amount = (existing.amount || 0) + (extracted.amount || 0)
+  } else if (!existing.unit && extracted.unit) {
+    // Update with unit if existing doesn't have one
+    existing.unit = extracted.unit
+    existing.amount = extracted.amount
+  } else if (existing.unit && !extracted.unit && existing.amount) {
+    // Keep existing unit if new one doesn't have unit
+    // Don't update amount
+  }
+  existing.extractedFrom.push(extracted)
+}
+
+/**
  * Aggregate ingredients from all steps, combining duplicates
+ * 
+ * This function processes recipe steps and manual ingredients, extracting
+ * ingredient information and combining duplicates based on name matching.
+ * When the same ingredient appears multiple times with the same unit,
+ * amounts are combined. Otherwise, ingredients are kept separate.
+ * 
+ * @param steps - Array of recipe step objects with text
+ * @param manualIngredients - Array of manually added ingredients
+ * @returns Array of aggregated ingredients with combined amounts where applicable
  */
 function aggregateIngredients(
   steps: FormStep[],
@@ -82,21 +160,10 @@ function aggregateIngredients(
       const existing = ingredientMap.get(key)
       
       if (existing) {
-        // Combine amounts if same unit, otherwise keep separate entries
-        if (existing.unit === extractedIng.unit && existing.amount && extractedIng.amount) {
-          existing.amount = existing.amount + extractedIng.amount
-        } else if (!existing.unit && extractedIng.unit) {
-          // Update with unit if existing doesn't have one
-          existing.unit = extractedIng.unit
-          existing.amount = extractedIng.amount
-        } else if (existing.unit && !extractedIng.unit && existing.amount) {
-          // Keep existing unit if new one doesn't have unit
-          // Don't update amount
-        }
-        existing.extractedFrom.push(extractedIng)
+        updateIngredientAmounts(existing, extractedIng)
       } else {
         ingredientMap.set(key, {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           name: extractedIng.name,
           amount: extractedIng.amount,
           unit: extractedIng.unit,
@@ -111,6 +178,14 @@ function aggregateIngredients(
 
 /**
  * Get ingredient suggestions based on existing ingredients
+ * 
+ * Uses fuzzy matching to find ingredients that match the query string.
+ * Returns up to the specified limit of suggestions, sorted by relevance score.
+ * 
+ * @param query - The search query string
+ * @param existingIngredients - Array of existing ingredients to search through
+ * @param limit - Maximum number of suggestions to return (default: 5)
+ * @returns Array of matching ingredients sorted by relevance
  */
 function getIngredientSuggestions(
   query: string,
@@ -124,7 +199,7 @@ function getIngredientSuggestions(
       ingredient: ing,
       score: fuzzyMatch(query, ing.name),
     }))
-    .filter(item => item.score > 0.3)
+    .filter(item => item.score > FUZZY_MATCH_SCORES.MIN_THRESHOLD)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map(item => item.ingredient)
@@ -140,11 +215,13 @@ export function RecipeCreationForm({
   const { isAuthenticated } = useAuth()
   const [title, setTitle] = useState('')
   const [servings, setServings] = useState<number>(1)
-  const [steps, setSteps] = useState<FormStep[]>([{ id: crypto.randomUUID(), text: '' }])
+  const [steps, setSteps] = useState<FormStep[]>([{ id: generateUUID(), text: '' }])
   const [manualIngredients, setManualIngredients] = useState<AggregatedIngredient[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const successTimeoutRef = useRef<number | null>(null)
+  const extractionTimeoutRef = useRef<number | null>(null)
   
   // Manual ingredient addition state
   const [showManualIngredient, setShowManualIngredient] = useState(false)
@@ -153,35 +230,83 @@ export function RecipeCreationForm({
   const [manualIngredientUnit, setManualIngredientUnit] = useState('')
   const [ingredientSuggestions, setIngredientSuggestions] = useState<AggregatedIngredient[]>([])
   
+  // Debounce steps for ingredient extraction to prevent race conditions
+  const deferredSteps = useDeferredValue(steps)
+  
   // Aggregate all ingredients (from steps + manual)
   const aggregatedIngredients = useMemo(() => {
-    return aggregateIngredients(steps, manualIngredients)
-  }, [steps, manualIngredients])
+    return aggregateIngredients(deferredSteps, manualIngredients)
+  }, [deferredSteps, manualIngredients])
   
-  // Update suggestions when manual ingredient name changes
+  // Memoize manual ingredient IDs for O(1) lookup
+  const manualIngredientIds = useMemo(
+    () => new Set(manualIngredients.map(m => m.id)),
+    [manualIngredients]
+  )
+  
+  // Update suggestions when manual ingredient name changes (debounced)
   const updateSuggestions = useCallback((name: string) => {
-    const suggestions = getIngredientSuggestions(name, aggregatedIngredients)
-    setIngredientSuggestions(suggestions)
+    // Clear any pending timeout
+    if (extractionTimeoutRef.current !== null) {
+      window.clearTimeout(extractionTimeoutRef.current)
+    }
+    
+    // Debounce suggestion updates
+    extractionTimeoutRef.current = window.setTimeout(() => {
+      const suggestions = getIngredientSuggestions(name, aggregatedIngredients)
+      setIngredientSuggestions(suggestions)
+      extractionTimeoutRef.current = null
+    }, 300)
   }, [aggregatedIngredients])
+  
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current !== null) {
+        window.clearTimeout(successTimeoutRef.current)
+      }
+      if (extractionTimeoutRef.current !== null) {
+        window.clearTimeout(extractionTimeoutRef.current)
+      }
+    }
+  }, [])
+  
+  // Clear error when user starts typing
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
   
   const handleStepChange = (id: string, text: string) => {
     setSteps(prev => prev.map(step => step.id === id ? { ...step, text } : step))
+    clearError()
   }
   
   const handleAddStep = () => {
-    setSteps(prev => [...prev, { id: crypto.randomUUID(), text: '' }])
+    setSteps(prev => [...prev, { id: generateUUID(), text: '' }])
   }
   
   const handleRemoveStep = (id: string) => {
     setSteps(prev => {
       const filtered = prev.filter(step => step.id !== id)
-      return filtered.length === 0 ? [{ id: crypto.randomUUID(), text: '' }] : filtered
+      return filtered.length === 0 ? [{ id: generateUUID(), text: '' }] : filtered
     })
   }
   
   const handleManualIngredientNameChange = (value: string) => {
     setManualIngredientName(value)
     updateSuggestions(value)
+    clearError()
+  }
+  
+  const handleTitleChange = (value: string) => {
+    setTitle(value)
+    clearError()
+  }
+  
+  const handleServingsChange = (value: string) => {
+    const parsed = value === '' ? 1 : parseInt(value, 10)
+    setServings(isNaN(parsed) ? 1 : parsed || 1)
+    clearError()
   }
   
   const handleSelectSuggestion = (suggestion: AggregatedIngredient) => {
@@ -199,16 +324,15 @@ export function RecipeCreationForm({
     const name = manualIngredientName.trim()
     if (!name) return
     
-    const amount = manualIngredientAmount.trim()
-      ? parseFloat(manualIngredientAmount.trim())
-      : undefined
+    const amountStr = manualIngredientAmount.trim()
+    const amount = amountStr ? parseFloat(amountStr) : undefined
     
     const unit = manualIngredientUnit.trim() || undefined
     
     const newIngredient: AggregatedIngredient = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name,
-      amount: isNaN(amount!) ? undefined : amount,
+      amount: (amount !== undefined && !isNaN(amount)) ? amount : undefined,
       unit,
       extractedFrom: [],
     }
@@ -296,7 +420,7 @@ export function RecipeCreationForm({
           }).filter((ref): ref is NonNullable<typeof ref> => ref !== null)
           
           return {
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             text: step.text.trim(),
             order: index,
             metadata: ingredientReferences.length > 0
@@ -325,12 +449,10 @@ export function RecipeCreationForm({
       
       setSuccess(true)
       
-      // Call success callback after a brief delay
-      setTimeout(() => {
-        if (onSuccess) {
-          onSuccess(uri)
-        }
-      }, 1000)
+      // Call success callback immediately - let parent handle timing
+      if (onSuccess) {
+        onSuccess(uri)
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to create recipe'
@@ -369,16 +491,22 @@ export function RecipeCreationForm({
           >
             Title <span className="text-red-500">*</span>
           </label>
-          <input
+            <input
             id="title"
             type="text"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => handleTitleChange(e.target.value)}
             placeholder="e.g., Chocolate Chip Cookies"
             className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             required
             disabled={isSubmitting}
+            aria-describedby={error && !title.trim() ? "title-error" : undefined}
           />
+          {error && !title.trim() && (
+            <p id="title-error" className="mt-1 text-sm text-red-600" role="alert">
+              Title is required
+            </p>
+          )}
         </div>
         
         {/* Servings */}
@@ -389,16 +517,22 @@ export function RecipeCreationForm({
           >
             Servings <span className="text-red-500">*</span>
           </label>
-          <input
+            <input
             id="servings"
             type="number"
             min="1"
             value={servings}
-            onChange={(e) => setServings(parseInt(e.target.value, 10) || 1)}
+            onChange={(e) => handleServingsChange(e.target.value)}
             className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             required
             disabled={isSubmitting}
+            aria-describedby={error && servings < 1 ? "servings-error" : undefined}
           />
+          {error && servings < 1 && (
+            <p id="servings-error" className="mt-1 text-sm text-red-600" role="alert">
+              Servings must be at least 1
+            </p>
+          )}
         </div>
         
         {/* Steps */}
@@ -465,16 +599,17 @@ export function RecipeCreationForm({
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Ingredient Name
                 </label>
-                <input
+                  <input
                   type="text"
                   value={manualIngredientName}
                   onChange={(e) => handleManualIngredientNameChange(e.target.value)}
                   placeholder="e.g., flour"
                   className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                   disabled={isSubmitting}
+                  aria-describedby="ingredient-suggestions"
                 />
                 {ingredientSuggestions.length > 0 && (
-                  <div className="mt-2 space-y-1">
+                  <div id="ingredient-suggestions" className="mt-2 space-y-1" role="listbox" aria-label="Ingredient suggestions">
                     <p className="text-xs text-gray-600">Suggestions:</p>
                     {ingredientSuggestions.map((suggestion) => (
                       <button
@@ -482,6 +617,7 @@ export function RecipeCreationForm({
                         type="button"
                         onClick={() => handleSelectSuggestion(suggestion)}
                         className="block w-full text-left px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
+                        role="option"
                       >
                         {suggestion.name}
                         {suggestion.amount && suggestion.unit
@@ -534,9 +670,9 @@ export function RecipeCreationForm({
           {/* Ingredients list */}
           {aggregatedIngredients.length > 0 ? (
             <div className="border border-gray-300 rounded-md p-4 bg-gray-50">
-              <ul className="space-y-2">
+              <ul className="space-y-2" aria-live="polite" aria-label="Recipe ingredients">
                 {aggregatedIngredients.map((ingredient) => {
-                  const isManual = manualIngredients.some(m => m.id === ingredient.id)
+                  const isManual = manualIngredientIds.has(ingredient.id)
                   return (
                     <li
                       key={ingredient.id}
