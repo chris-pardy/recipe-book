@@ -19,6 +19,9 @@ import { DeleteRecipeDialog } from './DeleteRecipeDialog'
 import { CollectionManagementDialog } from './CollectionManagementDialog'
 import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
+import { scaleRecipe, type ScaledRecipe } from '../utils/recipeScaling'
 import type { Recipe } from '../types/recipe'
 import type { Collection } from '../types/collection'
 
@@ -50,10 +53,49 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
   const [unforkError, setUnforkError] = useState<string | null>(null)
   const [subRecipePreviews, setSubRecipePreviews] = useState<Map<string, Recipe & { uri: string }>>(new Map())
   const [isLoadingSubRecipes, setIsLoadingSubRecipes] = useState(false)
+  const [adjustedServings, setAdjustedServings] = useState<number | null>(null)
+  const [scaledRecipe, setScaledRecipe] = useState<ScaledRecipe | null>(null)
+  const [scalingError, setScalingError] = useState<string | null>(null)
 
   const isOwned = isRecipeOwned(recipeUri, session?.did || null)
   const isForked = isRecipeForked(recipe)
   const forkMetadata = getForkMetadata(recipe)
+
+  // Update scaled recipe when recipe or adjusted servings change
+  useEffect(() => {
+    if (!recipe) {
+      setScaledRecipe(null)
+      setScalingError(null)
+      return
+    }
+
+    if (adjustedServings === null || adjustedServings === recipe.servings) {
+      setScaledRecipe(null)
+      setScalingError(null)
+      return
+    }
+
+    try {
+      const scaled = scaleRecipe(recipe, adjustedServings)
+      setScaledRecipe(scaled)
+      setScalingError(null)
+    } catch (error) {
+      console.error('Failed to scale recipe:', error)
+      setScaledRecipe(null)
+      setScalingError(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to adjust serving size. Please try again.'
+      )
+    }
+  }, [recipe, adjustedServings])
+
+  // Reset adjusted servings when recipe changes
+  useEffect(() => {
+    setAdjustedServings(null)
+    setScaledRecipe(null)
+    setScalingError(null)
+  }, [recipeUri])
 
   // Load recipe from IndexedDB first, then from PDS if needed
   useEffect(() => {
@@ -399,15 +441,77 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {/* Serving Size Adjustment */}
             <div>
               <h3 className="font-semibold mb-2">Servings</h3>
-              <p>{recipe.servings}</p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="servings-input" className="min-w-[100px]">
+                    Adjust servings:
+                  </Label>
+                  <Input
+                    id="servings-input"
+                    type="number"
+                    min="0.25"
+                    max="100"
+                    step="0.25"
+                    value={adjustedServings ?? recipe.servings}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value)
+                      if (!isNaN(value) && value > 0) {
+                        setAdjustedServings(value)
+                      } else {
+                        setAdjustedServings(null)
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = parseFloat(e.target.value)
+                      // Validate on blur: ensure value is within valid range
+                      if (isNaN(value) || value < 0.25 || value > 100) {
+                        // Reset to original servings if invalid
+                        setAdjustedServings(null)
+                        e.target.value = recipe.servings.toString()
+                      }
+                    }}
+                    aria-label="Adjust serving size"
+                    aria-describedby="servings-description"
+                    className="w-24"
+                  />
+                  {adjustedServings !== null && adjustedServings !== recipe.servings && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAdjustedServings(null)}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+                <p id="servings-description" className="text-sm text-muted-foreground">
+                  {scaledRecipe ? (
+                    <>
+                      Original: {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''} • 
+                      Adjusted: {scaledRecipe.adjustedServings} serving{scaledRecipe.adjustedServings !== 1 ? 's' : ''} 
+                      (×{scaledRecipe.multiplier.toFixed(2)})
+                    </>
+                  ) : (
+                    <>
+                      {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </p>
+                {scalingError && (
+                  <p className="text-sm text-destructive mt-1" role="alert">
+                    {scalingError}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div>
               <h3 className="font-semibold mb-2">Ingredients</h3>
               <ul className="list-disc list-inside">
-                {recipe.ingredients.map((ingredient) => (
+                {(scaledRecipe?.ingredients || recipe.ingredients).map((ingredient) => (
                   <li key={ingredient.id}>
                     {ingredient.amount && ingredient.unit
                       ? `${ingredient.amount} ${ingredient.unit} ${ingredient.name}`
@@ -420,7 +524,7 @@ export function RecipeView({ recipeUri }: RecipeViewProps) {
             <div>
               <h3 className="font-semibold mb-2">Steps</h3>
               <ol className="list-decimal list-inside space-y-2">
-                {recipe.steps
+                {(scaledRecipe?.steps || recipe.steps)
                   .sort((a, b) => a.order - b.order)
                   .map((step) => (
                     <li key={step.id}>{step.text}</li>

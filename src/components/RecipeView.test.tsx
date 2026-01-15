@@ -90,7 +90,7 @@ describe('RecipeView', () => {
   
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(useAuth).mockReturnValue({
+    ;(useAuth as any).mockReturnValue({
       isLoading: false,
       isAuthenticated: true,
       session: mockSession,
@@ -99,11 +99,11 @@ describe('RecipeView', () => {
       logout: vi.fn(),
       handleCallback: vi.fn(),
     })
-    vi.mocked(isRecipeOwned).mockReturnValue(true)
+    ;(isRecipeOwned as any).mockReturnValue(true)
   })
 
   it('should display recipe from cache', async () => {
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
+    ;(recipeDB.get as any).mockResolvedValue(mockRecipe)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -111,7 +111,7 @@ describe('RecipeView', () => {
       expect(screen.getByText('Test Recipe')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText(/4 serving/)).toBeInTheDocument()
     expect(screen.getByText(/240 g flour/)).toBeInTheDocument()
     expect(screen.getByText(/60 g sugar/)).toBeInTheDocument()
     expect(screen.getByText('Mix ingredients')).toBeInTheDocument()
@@ -119,8 +119,8 @@ describe('RecipeView', () => {
   })
 
   it('should show edit and delete buttons for owned recipes', async () => {
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
-    vi.mocked(isRecipeOwned).mockReturnValue(true)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
+    (isRecipeOwned as any).mockReturnValue(true)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -131,8 +131,8 @@ describe('RecipeView', () => {
   })
 
   it('should not show edit/delete buttons for non-owned recipes', async () => {
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
-    vi.mocked(isRecipeOwned).mockReturnValue(false)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
+    (isRecipeOwned as any).mockReturnValue(false)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -149,14 +149,14 @@ describe('RecipeView', () => {
   })
 
   it('should show "Add to My Recipes" button for non-owned recipes', async () => {
-    vi.mocked(isRecipeOwned).mockReturnValue(false)
+    (isRecipeOwned as any).mockReturnValue(false)
     // Recipe not in cache, so it will be fetched from PDS
-    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    (recipeDB.get as any).mockResolvedValue(undefined)
     const mockAgent = {} as any
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
-    vi.mocked(recipeDB.put).mockResolvedValue(undefined)
-    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (getRecipe as any).mockResolvedValue(mockRecipe)
+    (recipeDB.put as any).mockResolvedValue(undefined)
+    (getCollectionsForRecipe as any).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -166,9 +166,9 @@ describe('RecipeView', () => {
   })
 
   it('should not show "Add to My Recipes" button if recipe is already added', async () => {
-    vi.mocked(isRecipeOwned).mockReturnValue(false)
+    (isRecipeOwned as any).mockReturnValue(false)
     // Recipe loaded from cache, so it's already in My Recipes
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -187,15 +187,15 @@ describe('RecipeView', () => {
 
   it('should add recipe to My Recipes when button is clicked', async () => {
     const user = userEvent.setup()
-    vi.mocked(isRecipeOwned).mockReturnValue(false)
+    (isRecipeOwned as any).mockReturnValue(false)
     // Recipe not in cache, so it will be fetched from PDS
-    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    (recipeDB.get as any).mockResolvedValue(undefined)
     const mockAgent = {} as any
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
-    vi.mocked(recipeDB.put).mockResolvedValue(undefined)
-    vi.mocked(ensureRecipeInDefaultCollection).mockResolvedValue(undefined)
-    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (getRecipe as any).mockResolvedValue(mockRecipe)
+    (recipeDB.put as any).mockResolvedValue(undefined)
+    (ensureRecipeInDefaultCollection as any).mockResolvedValue(undefined)
+    (getCollectionsForRecipe as any).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -213,18 +213,18 @@ describe('RecipeView', () => {
 
   it('should show error when adding recipe to My Recipes fails', async () => {
     const user = userEvent.setup()
-    vi.mocked(isRecipeOwned).mockReturnValue(false)
+    (isRecipeOwned as any).mockReturnValue(false)
     // Recipe not in cache, so it will be fetched from PDS
-    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    (recipeDB.get as any).mockResolvedValue(undefined)
     const mockAgent = {} as any
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (getRecipe as any).mockResolvedValue(mockRecipe)
     // First call: cache recipe after fetching from PDS (succeeds)
     // Second call: add to My Recipes button click (fails)
     vi.mocked(recipeDB.put)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('Failed to save'))
-    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+    (getCollectionsForRecipe as any).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -243,8 +243,8 @@ describe('RecipeView', () => {
 
   it('should navigate to edit route when edit button is clicked', async () => {
     const user = userEvent.setup()
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
-    vi.mocked(isRecipeOwned).mockReturnValue(true)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
+    (isRecipeOwned as any).mockReturnValue(true)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -262,12 +262,12 @@ describe('RecipeView', () => {
 
   it('should fetch recipe from PDS if not in cache', async () => {
     const mockAgent = {} as any
-    vi.mocked(isRecipeOwned).mockReturnValue(true)
-    vi.mocked(recipeDB.get).mockResolvedValue(undefined) // Not in cache
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
-    vi.mocked(recipeDB.put).mockResolvedValue(undefined)
-    vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+    (isRecipeOwned as any).mockReturnValue(true)
+    (recipeDB.get as any).mockResolvedValue(undefined) // Not in cache
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (getRecipe as any).mockResolvedValue(mockRecipe)
+    (recipeDB.put as any).mockResolvedValue(undefined)
+    (getCollectionsForRecipe as any).mockResolvedValue([])
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -281,7 +281,7 @@ describe('RecipeView', () => {
   })
 
   it('should show loading state', () => {
-    vi.mocked(recipeDB.get).mockImplementation(
+    (recipeDB.get as any).mockImplementation(
       () => new Promise(() => {}), // Never resolves
     )
 
@@ -291,10 +291,10 @@ describe('RecipeView', () => {
   })
 
   it('should show error when recipe not found', async () => {
-    vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+    (recipeDB.get as any).mockResolvedValue(undefined)
     const mockAgent = {} as any
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(getRecipe).mockResolvedValue(null)
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (getRecipe as any).mockResolvedValue(null)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -305,7 +305,7 @@ describe('RecipeView', () => {
 
   it('should open delete dialog when delete button is clicked', async () => {
     const user = userEvent.setup()
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -324,9 +324,9 @@ describe('RecipeView', () => {
   it('should delete recipe and redirect when confirmed', async () => {
     const user = userEvent.setup()
     const mockAgent = {} as any
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(deleteRecipeComplete).mockResolvedValue(undefined)
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (deleteRecipeComplete as any).mockResolvedValue(undefined)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -355,9 +355,9 @@ describe('RecipeView', () => {
   it('should show error when deletion fails', async () => {
     const user = userEvent.setup()
     const mockAgent = {} as any
-    vi.mocked(recipeDB.get).mockResolvedValue(mockRecipe)
-    vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-    vi.mocked(deleteRecipeComplete).mockRejectedValue(new Error('Delete failed'))
+    (recipeDB.get as any).mockResolvedValue(mockRecipe)
+    (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+    (deleteRecipeComplete as any).mockRejectedValue(new Error('Delete failed'))
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -388,7 +388,7 @@ describe('RecipeView', () => {
         'at://did:plc:other123/dev.chrispardy.recipes/sub2',
       ],
     }
-    vi.mocked(recipeDB.get).mockResolvedValue(recipeWithSubRecipes)
+    (recipeDB.get as any).mockResolvedValue(recipeWithSubRecipes)
 
     render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -416,9 +416,9 @@ describe('RecipeView', () => {
     }
 
     it('should display fork indicator for forked recipes', async () => {
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
 
       render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
 
@@ -428,9 +428,9 @@ describe('RecipeView', () => {
     })
 
     it('should show unfork button for forked recipes', async () => {
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
 
       render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
 
@@ -441,14 +441,14 @@ describe('RecipeView', () => {
 
     it('should create fork metadata when adding non-owned recipe to My Recipes', async () => {
       const user = userEvent.setup()
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(undefined)
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(undefined)
       const mockAgent = {} as any
-      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-      vi.mocked(getRecipe).mockResolvedValue(mockRecipe)
-      vi.mocked(recipeDB.put).mockResolvedValue(undefined)
-      vi.mocked(ensureRecipeInDefaultCollection).mockResolvedValue(undefined)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+      (getRecipe as any).mockResolvedValue(mockRecipe)
+      (recipeDB.put as any).mockResolvedValue(undefined)
+      (ensureRecipeInDefaultCollection as any).mockResolvedValue(undefined)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
 
       render(<RecipeView recipeUri={mockRecipe.uri} />, { wrapper })
 
@@ -461,7 +461,7 @@ describe('RecipeView', () => {
 
       await waitFor(() => {
         // Should be called with fork metadata
-        const putCalls = vi.mocked(recipeDB.put).mock.calls
+        const putCalls = (recipeDB.put as any).mock.calls
         const addToMyRecipesCall = putCalls.find(
           (call) => call[0] === mockRecipe.uri && call.length === 5
         )
@@ -476,13 +476,13 @@ describe('RecipeView', () => {
 
     it('should unfork recipe when unfork button is clicked', async () => {
       const user = userEvent.setup()
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
       const mockAgent = {} as any
-      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-      vi.mocked(collectionDB.getAll).mockResolvedValue([])
-      vi.mocked(recipeDB.delete).mockResolvedValue(undefined)
+      (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+      (collectionDB.getAll as any).mockResolvedValue([])
+      (recipeDB.delete as any).mockResolvedValue(undefined)
 
       render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
 
@@ -515,14 +515,14 @@ describe('RecipeView', () => {
         updatedAt: '2024-01-01T00:00:00Z',
       }
 
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
       const mockAgent = {} as any
-      vi.mocked(getAuthenticatedAgent).mockResolvedValue(mockAgent)
-      vi.mocked(collectionDB.getAll).mockResolvedValue([collection1, collection2])
-      vi.mocked(updateCollection).mockResolvedValue({ uri: collection1.uri, cid: 'cid1' })
-      vi.mocked(recipeDB.delete).mockResolvedValue(undefined)
+      (getAuthenticatedAgent as any).mockResolvedValue(mockAgent)
+      (collectionDB.getAll as any).mockResolvedValue([collection1, collection2])
+      (updateCollection as any).mockResolvedValue({ uri: collection1.uri, cid: 'cid1' })
+      (recipeDB.delete as any).mockResolvedValue(undefined)
 
       render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
 
@@ -546,9 +546,9 @@ describe('RecipeView', () => {
     })
 
     it('should not show edit button for forked recipes', async () => {
-      vi.mocked(isRecipeOwned).mockReturnValue(false)
-      vi.mocked(recipeDB.get).mockResolvedValue(forkedRecipe)
-      vi.mocked(getCollectionsForRecipe).mockResolvedValue([])
+      (isRecipeOwned as any).mockReturnValue(false)
+      (recipeDB.get as any).mockResolvedValue(forkedRecipe)
+      (getCollectionsForRecipe as any).mockResolvedValue([])
 
       render(<RecipeView recipeUri={forkedRecipe.uri} />, { wrapper })
 
@@ -559,6 +559,260 @@ describe('RecipeView', () => {
       expect(
         screen.queryByRole('button', { name: /edit recipe/i }),
       ).not.toBeInTheDocument()
+    })
+  })
+
+  describe('serving size adjustment', () => {
+    const recipeWithIngredients: Recipe & { uri: string } = {
+      uri: 'at://did:plc:user123/dev.chrispardy.recipes/rkey123',
+      title: 'Test Recipe',
+      servings: 4,
+      ingredients: [
+        { id: '1', name: 'flour', amount: 240, unit: 'g' },
+        { id: '2', name: 'sugar', amount: 60, unit: 'g' },
+        { id: '3', name: 'eggs', amount: 2 },
+      ],
+      steps: [
+        {
+          id: '1',
+          text: 'Mix 240g flour and 60g sugar',
+          order: 1,
+        },
+        {
+          id: '2',
+          text: 'Add 2 eggs',
+          order: 2,
+        },
+      ],
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+    }
+
+    it('should display serving size adjustment input', async () => {
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      expect(screen.getByLabelText(/adjust servings/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/adjust servings/i)).toHaveValue(4)
+    })
+
+    it('should allow adjusting serving size', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        expect(servingsInput).toHaveValue(8)
+      })
+    })
+
+    it('should display scaled ingredients when serving size is adjusted', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        // Should show scaled amounts (doubled)
+        expect(screen.getByText(/480 g flour/)).toBeInTheDocument()
+        expect(screen.getByText(/120 g sugar/)).toBeInTheDocument()
+        expect(screen.getByText(/4 eggs/)).toBeInTheDocument()
+      })
+    })
+
+    it('should regenerate step text with scaled amounts', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        // Step text should be regenerated with scaled amounts
+        expect(screen.getByText(/Mix 480g flour and 120g sugar/)).toBeInTheDocument()
+        expect(screen.getByText(/Add 4 eggs/)).toBeInTheDocument()
+      })
+    })
+
+    it('should display both original and adjusted servings', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        expect(screen.getByText(/Original: 4 serving/)).toBeInTheDocument()
+        expect(screen.getByText(/Adjusted: 8 serving/)).toBeInTheDocument()
+        expect(screen.getByText(/×2.00/)).toBeInTheDocument()
+      })
+    })
+
+    it('should handle fractional servings', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '6')
+
+      await waitFor(() => {
+        // 6 servings = 1.5x multiplier
+        // 240 * 1.5 = 360, 60 * 1.5 = 90, 2 * 1.5 = 3
+        expect(screen.getByText(/360 g flour/)).toBeInTheDocument()
+        expect(screen.getByText(/90 g sugar/)).toBeInTheDocument()
+        expect(screen.getByText(/3 eggs/)).toBeInTheDocument()
+        expect(screen.getByText(/×1.50/)).toBeInTheDocument()
+      })
+    })
+
+    it('should show reset button when servings are adjusted', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument()
+      })
+    })
+
+    it('should reset to original servings when reset button is clicked', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument()
+      })
+
+      const resetButton = screen.getByRole('button', { name: /reset/i })
+      await user.click(resetButton)
+
+      await waitFor(() => {
+        expect(servingsInput).toHaveValue(4)
+        // Should show original amounts
+        expect(screen.getByText(/240 g flour/)).toBeInTheDocument()
+        expect(screen.getByText(/60 g sugar/)).toBeInTheDocument()
+        expect(screen.getByText(/2 eggs/)).toBeInTheDocument()
+        // Reset button should be gone
+        expect(screen.queryByRole('button', { name: /reset/i })).not.toBeInTheDocument()
+      })
+    })
+
+    it('should preserve original recipe data when scaling', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const originalAmount = recipeWithIngredients.ingredients[0].amount
+      const originalServings = recipeWithIngredients.servings
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '8')
+
+      await waitFor(() => {
+        // Verify scaled amounts are shown
+        expect(screen.getByText(/480 g flour/)).toBeInTheDocument()
+      })
+
+      // Verify original recipe is unchanged (we can't directly access it, but we can verify
+      // that resetting shows original values)
+      const resetButton = screen.getByRole('button', { name: /reset/i })
+      await user.click(resetButton)
+
+      await waitFor(() => {
+        expect(servingsInput).toHaveValue(originalServings)
+        expect(screen.getByText(new RegExp(`${originalAmount} g flour`))).toBeInTheDocument()
+      })
+    })
+
+    it('should handle very small fractional servings', async () => {
+      const user = userEvent.setup()
+      (recipeDB.get as any).mockResolvedValue(recipeWithIngredients)
+
+      render(<RecipeView recipeUri={recipeWithIngredients.uri} />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Recipe')).toBeInTheDocument()
+      })
+
+      const servingsInput = screen.getByLabelText(/adjust servings/i)
+      await user.clear(servingsInput)
+      await user.type(servingsInput, '1')
+
+      await waitFor(() => {
+        // 1 serving = 0.25x multiplier (1/4)
+        // 240 * 0.25 = 60, 60 * 0.25 = 15, 2 * 0.25 = 0.5
+        expect(screen.getByText(/60 g flour/)).toBeInTheDocument()
+        expect(screen.getByText(/15 g sugar/)).toBeInTheDocument()
+        expect(screen.getByText(/0.5 eggs/)).toBeInTheDocument()
+      })
     })
   })
 })
